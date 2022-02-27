@@ -7,6 +7,7 @@ require (
 	github.com/bgentry/speakeasy v0.1.0 // indirect
 	github.com/editorconfig/editorconfig-core-go/v2 v2.4.3
 	github.com/fatih/color v1.9.0 // indirect
+	github.com/go-ldap/ldap/v3 v3.4.1
 	github.com/go-macaron/binding v1.2.0
 	github.com/go-macaron/cache v0.0.0-20190810181446-10f7c57e2196
 	github.com/go-macaron/captcha v0.2.0
@@ -34,7 +35,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.18
 	github.com/msteinert/pam v0.0.0-20190215180659-f29b9f28d6f9
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
-	github.com/niklasfasching/go-org v0.1.9
+	github.com/niklasfasching/go-org v1.6.1
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/pquerna/otp v1.3.0
@@ -55,10 +56,8 @@ require (
 	golang.org/x/text v0.3.7
 	gopkg.in/DATA-DOG/go-sqlmock.v2 v2.0.0-20180914054222-c19298f520d0
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
-	gopkg.in/asn1-ber.v1 v1.0.0-20181015200546-f715ec2f112d // indirect
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gopkg.in/ini.v1 v1.66.4
-	gopkg.in/ldap.v2 v2.5.1
 	gopkg.in/macaron.v1 v1.4.0
 	gorm.io/driver/mysql v1.2.3
 	gorm.io/driver/postgres v1.2.3
