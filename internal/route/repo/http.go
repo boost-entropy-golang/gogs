@@ -142,8 +142,8 @@ func HTTPContexter() macaron.Handler {
 				}
 				return
 			}
-			if err = db.AccessTokens.Save(c.Req.Context(), token); err != nil {
-				log.Error("Failed to update access token: %v", err)
+			if err = db.AccessTokens.Touch(c.Req.Context(), token.ID); err != nil {
+				log.Error("Failed to touch access token: %v", err)
 			}
 
 			authUser, err = db.Users.GetByID(token.UserID)
@@ -166,7 +166,7 @@ Please create and use personal access token on user settings page`)
 		if isPull {
 			mode = db.AccessModeRead
 		}
-		if !db.Perms.Authorize(authUser.ID, repo.ID, mode,
+		if !db.Perms.Authorize(c.Req.Context(), authUser.ID, repo.ID, mode,
 			db.AccessModeOptions{
 				OwnerID: repo.OwnerID,
 				Private: repo.IsPrivate,

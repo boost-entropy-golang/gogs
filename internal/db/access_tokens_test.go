@@ -61,14 +61,12 @@ func TestAccessTokens(t *testing.T) {
 		{"DeleteByID", accessTokensDeleteByID},
 		{"GetBySHA1", accessTokensGetBySHA},
 		{"List", accessTokensList},
-		{"Save", accessTokensSave},
+		{"Touch", accessTokensTouch},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(func() {
 				err := clearTables(t, db.DB, tables...)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 			})
 			tc.test(t, db)
 		})
@@ -123,8 +121,8 @@ func accessTokensDeleteByID(t *testing.T, db *accessTokens) {
 
 	// We should get token not found error
 	_, err = db.GetBySHA1(ctx, token.Sha1)
-	expErr := ErrAccessTokenNotExist{args: errutil.Args{"sha": token.Sha1}}
-	assert.Equal(t, expErr, err)
+	wantErr := ErrAccessTokenNotExist{args: errutil.Args{"sha": token.Sha1}}
+	assert.Equal(t, wantErr, err)
 }
 
 func accessTokensGetBySHA(t *testing.T, db *accessTokens) {
@@ -140,8 +138,8 @@ func accessTokensGetBySHA(t *testing.T, db *accessTokens) {
 
 	// Try to get a non-existent token
 	_, err = db.GetBySHA1(ctx, "bad_sha")
-	expErr := ErrAccessTokenNotExist{args: errutil.Args{"sha": "bad_sha"}}
-	assert.Equal(t, expErr, err)
+	wantErr := ErrAccessTokenNotExist{args: errutil.Args{"sha": "bad_sha"}}
+	assert.Equal(t, wantErr, err)
 }
 
 func accessTokensList(t *testing.T, db *accessTokens) {
@@ -169,7 +167,7 @@ func accessTokensList(t *testing.T, db *accessTokens) {
 	assert.Equal(t, "user1_2", tokens[1].Name)
 }
 
-func accessTokensSave(t *testing.T, db *accessTokens) {
+func accessTokensTouch(t *testing.T, db *accessTokens) {
 	ctx := context.Background()
 
 	// Create an access token with name "Test"
@@ -179,7 +177,7 @@ func accessTokensSave(t *testing.T, db *accessTokens) {
 	// Updated field is zero now
 	assert.True(t, token.Updated.IsZero())
 
-	err = db.Save(ctx, token)
+	err = db.Touch(ctx, token.ID)
 	require.NoError(t, err)
 
 	// Get back from DB should have Updated set

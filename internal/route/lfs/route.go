@@ -82,8 +82,8 @@ func authenticate() macaron.Handler {
 				}
 				return
 			}
-			if err = db.AccessTokens.Save(c.Req.Context(), token); err != nil {
-				log.Error("Failed to update access token: %v", err)
+			if err = db.AccessTokens.Touch(c.Req.Context(), token.ID); err != nil {
+				log.Error("Failed to touch access token: %v", err)
 			}
 
 			user, err = db.Users.GetByID(token.UserID)
@@ -130,7 +130,7 @@ func authorize(mode db.AccessMode) macaron.Handler {
 			return
 		}
 
-		if !db.Perms.Authorize(actor.ID, repo.ID, mode,
+		if !db.Perms.Authorize(c.Req.Context(), actor.ID, repo.ID, mode,
 			db.AccessModeOptions{
 				OwnerID: repo.OwnerID,
 				Private: repo.IsPrivate,
