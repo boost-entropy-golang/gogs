@@ -161,7 +161,7 @@ func LoginPost(c *context.Context, f form.SignIn) {
 		return
 	}
 
-	u, err := db.Users.Authenticate(f.UserName, f.Password, f.LoginSource)
+	u, err := db.Users.Authenticate(c.Req.Context(), f.UserName, f.Password, f.LoginSource)
 	if err != nil {
 		switch errors.Cause(err).(type) {
 		case auth.ErrBadCredentials:
@@ -210,7 +210,7 @@ func LoginTwoFactorPost(c *context.Context) {
 		return
 	}
 
-	t, err := db.TwoFactors.GetByUserID(userID)
+	t, err := db.TwoFactors.GetByUserID(c.Req.Context(), userID)
 	if err != nil {
 		c.Error(err, "get two factor by user ID")
 		return
