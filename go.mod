@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/Masterminds/semver/v3 v3.1.1
 	github.com/bgentry/speakeasy v0.1.0 // indirect
-	github.com/derision-test/go-mockgen v1.2.0
+	github.com/derision-test/go-mockgen v1.3.3
 	github.com/editorconfig/editorconfig-core-go/v2 v2.4.4
 	github.com/fatih/color v1.9.0 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.3
@@ -64,7 +64,7 @@ require (
 	gorm.io/driver/postgres v1.3.7
 	gorm.io/driver/sqlite v1.3.4
 	gorm.io/driver/sqlserver v1.3.1
-	gorm.io/gorm v1.23.5
+	gorm.io/gorm v1.23.6
 	modernc.org/sqlite v1.17.3
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
