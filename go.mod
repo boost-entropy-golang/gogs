@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/Masterminds/semver/v3 v3.1.1
-	github.com/derision-test/go-mockgen v1.3.3
+	github.com/derision-test/go-mockgen v1.3.4
 	github.com/editorconfig/editorconfig-core-go/v2 v2.4.5
 	github.com/go-ldap/ldap/v3 v3.4.4
 	github.com/go-macaron/binding v1.2.0
@@ -47,14 +47,14 @@ require (
 	golang.org/x/text v0.3.7
 	gopkg.in/DATA-DOG/go-sqlmock.v2 v2.0.0-20180914054222-c19298f520d0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
-	gopkg.in/ini.v1 v1.66.6
+	gopkg.in/ini.v1 v1.67.0
 	gopkg.in/macaron.v1 v1.4.0
-	gorm.io/driver/mysql v1.3.5
-	gorm.io/driver/postgres v1.3.8
+	gorm.io/driver/mysql v1.3.6
+	gorm.io/driver/postgres v1.3.9
 	gorm.io/driver/sqlite v1.3.4
 	gorm.io/driver/sqlserver v1.3.1
 	gorm.io/gorm v1.23.8
-	modernc.org/sqlite v1.18.0
+	modernc.org/sqlite v1.18.1
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
 	xorm.io/core v0.7.2
@@ -123,8 +123,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/uint128 v1.1.1 // indirect
 	modernc.org/cc/v3 v3.36.0 // indirect
-	modernc.org/ccgo/v3 v3.16.6 // indirect
-	modernc.org/libc v1.16.7 // indirect
+	modernc.org/ccgo/v3 v3.16.8 // indirect
+	modernc.org/libc v1.16.19 // indirect
 	modernc.org/mathutil v1.4.1 // indirect
 	modernc.org/memory v1.1.1 // indirect
 	modernc.org/opt v0.1.1 // indirect
