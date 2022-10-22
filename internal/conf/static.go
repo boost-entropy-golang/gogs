@@ -71,20 +71,6 @@ var (
 		FromEmail string `ini:"-"` // Parsed email address of From without person's name.
 	}
 
-	// Authentication settings
-	Auth struct {
-		ActivateCodeLives         int
-		ResetPasswordCodeLives    int
-		RequireEmailConfirmation  bool
-		RequireSigninView         bool
-		DisableRegistration       bool
-		EnableRegistrationCaptcha bool
-
-		EnableReverseProxyAuthentication   bool
-		EnableReverseProxyAutoRegistration bool
-		ReverseProxyAuthenticationHeader   string
-	}
-
 	// User settings
 	User struct {
 		EnableEmailNotification bool
@@ -138,18 +124,6 @@ var (
 
 		// Derived from other static values
 		FormatLayout string `ini:"-"` // Actual layout of the Format.
-	}
-
-	// Picture settings
-	Picture struct {
-		AvatarUploadPath           string
-		RepositoryAvatarUploadPath string
-		GravatarSource             string
-		DisableGravatar            bool
-		EnableFederatedAvatar      bool
-
-		// Derived from other static values
-		LibravatarService *libravatar.Libravatar `ini:"-"` // Initialized client for federated avatar.
 	}
 
 	// Mirror settings
@@ -267,6 +241,22 @@ type AppOpts struct {
 
 // Application settings
 var App AppOpts
+
+type AuthOpts struct {
+	ActivateCodeLives         int
+	ResetPasswordCodeLives    int
+	RequireEmailConfirmation  bool
+	RequireSigninView         bool
+	DisableRegistration       bool
+	EnableRegistrationCaptcha bool
+
+	EnableReverseProxyAuthentication   bool
+	EnableReverseProxyAutoRegistration bool
+	ReverseProxyAuthenticationHeader   string
+}
+
+// Authentication settings
+var Auth AuthOpts
 
 type ServerOpts struct {
 	ExternalURL          string `ini:"EXTERNAL_URL"`
@@ -400,6 +390,20 @@ type UIOpts struct {
 // UI settings
 var UI UIOpts
 
+type PictureOpts struct {
+	AvatarUploadPath           string
+	RepositoryAvatarUploadPath string
+	GravatarSource             string
+	DisableGravatar            bool
+	EnableFederatedAvatar      bool
+
+	// Derived from other static values
+	LibravatarService *libravatar.Libravatar `ini:"-"` // Initialized client for federated avatar.
+}
+
+// Picture settings
+var Picture PictureOpts
+
 type i18nConf struct {
 	Langs     []string          `delim:","`
 	Names     []string          `delim:","`
@@ -440,3 +444,11 @@ var (
 	UsePostgreSQL bool
 	UseMSSQL      bool
 )
+
+// UsersAvatarPathPrefix is the path prefix to user avatars.
+const UsersAvatarPathPrefix = "avatars"
+
+// UserDefaultAvatarURLPath returns the URL path of the default user avatar.
+func UserDefaultAvatarURLPath() string {
+	return Server.Subpath + "/img/avatar_default.png"
+}

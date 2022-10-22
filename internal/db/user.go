@@ -27,7 +27,6 @@ import (
 	"xorm.io/xorm"
 
 	"github.com/gogs/git-module"
-	api "github.com/gogs/go-gogs-client"
 
 	"gogs.io/gogs/internal/avatar"
 	"gogs.io/gogs/internal/conf"
@@ -35,79 +34,16 @@ import (
 	"gogs.io/gogs/internal/errutil"
 	"gogs.io/gogs/internal/strutil"
 	"gogs.io/gogs/internal/tool"
+	"gogs.io/gogs/internal/userutil"
 )
 
-// USER_AVATAR_URL_PREFIX is used to identify a URL is to access user avatar.
-const USER_AVATAR_URL_PREFIX = "avatars"
-
-type UserType int
-
-const (
-	UserIndividual UserType = iota // Historic reason to make it starts at 0.
-	UserOrganization
-)
-
-// User represents the object of individual and member of organization.
-type User struct {
-	ID        int64  `gorm:"primaryKey"`
-	LowerName string `xorm:"UNIQUE NOT NULL" gorm:"unique;not null"`
-	Name      string `xorm:"UNIQUE NOT NULL" gorm:"not null"`
-	FullName  string
-	// Email is the primary email address (to be used for communication)
-	Email       string `xorm:"NOT NULL" gorm:"not null"`
-	Passwd      string `xorm:"NOT NULL" gorm:"not null"`
-	LoginSource int64  `xorm:"NOT NULL DEFAULT 0" gorm:"not null;default:0"`
-	LoginName   string
-	Type        UserType
-	OwnedOrgs   []*User       `xorm:"-" gorm:"-" json:"-"`
-	Orgs        []*User       `xorm:"-" gorm:"-" json:"-"`
-	Repos       []*Repository `xorm:"-" gorm:"-" json:"-"`
-	Location    string
-	Website     string
-	Rands       string `xorm:"VARCHAR(10)" gorm:"type:VARCHAR(10)"`
-	Salt        string `xorm:"VARCHAR(10)" gorm:"type:VARCHAR(10)"`
-
-	Created     time.Time `xorm:"-" gorm:"-" json:"-"`
-	CreatedUnix int64
-	Updated     time.Time `xorm:"-" gorm:"-" json:"-"`
-	UpdatedUnix int64
-
-	// Remember visibility choice for convenience, true for private
-	LastRepoVisibility bool
-	// Maximum repository creation limit, -1 means use global default
-	MaxRepoCreation int `xorm:"NOT NULL DEFAULT -1" gorm:"not null;default:-1"`
-
-	// Permissions
-	IsActive         bool // Activate primary email
-	IsAdmin          bool
-	AllowGitHook     bool
-	AllowImportLocal bool // Allow migrate repository by local path
-	ProhibitLogin    bool
-
-	// Avatar
-	Avatar          string `xorm:"VARCHAR(2048) NOT NULL" gorm:"type:VARCHAR(2048);not null"`
-	AvatarEmail     string `xorm:"NOT NULL" gorm:"not null"`
-	UseCustomAvatar bool
-
-	// Counters
-	NumFollowers int
-	NumFollowing int `xorm:"NOT NULL DEFAULT 0" gorm:"not null;default:0"`
-	NumStars     int
-	NumRepos     int
-
-	// For organization
-	Description string
-	NumTeams    int
-	NumMembers  int
-	Teams       []*Team `xorm:"-" gorm:"-" json:"-"`
-	Members     []*User `xorm:"-" gorm:"-" json:"-"`
-}
-
+// TODO(unknwon): Delete me once refactoring is done.
 func (u *User) BeforeInsert() {
 	u.CreatedUnix = time.Now().Unix()
 	u.UpdatedUnix = u.CreatedUnix
 }
 
+// TODO(unknwon): Refactoring together with methods that do updates.
 func (u *User) BeforeUpdate() {
 	if u.MaxRepoCreation < -1 {
 		u.MaxRepoCreation = -1
@@ -115,6 +51,7 @@ func (u *User) BeforeUpdate() {
 	u.UpdatedUnix = time.Now().Unix()
 }
 
+// TODO(unknwon): Delete me once refactoring is done.
 func (u *User) AfterSet(colName string, _ xorm.Cell) {
 	switch colName {
 	case "created_unix":
@@ -122,150 +59,6 @@ func (u *User) AfterSet(colName string, _ xorm.Cell) {
 	case "updated_unix":
 		u.Updated = time.Unix(u.UpdatedUnix, 0).Local()
 	}
-}
-
-func (u *User) APIFormat() *api.User {
-	return &api.User{
-		ID:        u.ID,
-		UserName:  u.Name,
-		Login:     u.Name,
-		FullName:  u.FullName,
-		Email:     u.Email,
-		AvatarUrl: u.AvatarLink(),
-	}
-}
-
-func (u *User) RepoCreationNum() int {
-	if u.MaxRepoCreation <= -1 {
-		return conf.Repository.MaxCreationLimit
-	}
-	return u.MaxRepoCreation
-}
-
-func (u *User) CanCreateRepo() bool {
-	if u.MaxRepoCreation <= -1 {
-		if conf.Repository.MaxCreationLimit <= -1 {
-			return true
-		}
-		return u.NumRepos < conf.Repository.MaxCreationLimit
-	}
-	return u.NumRepos < u.MaxRepoCreation
-}
-
-func (u *User) CanCreateOrganization() bool {
-	return !conf.Admin.DisableRegularOrgCreation || u.IsAdmin
-}
-
-// CanEditGitHook returns true if user can edit Git hooks.
-func (u *User) CanEditGitHook() bool {
-	return u.IsAdmin || u.AllowGitHook
-}
-
-// CanImportLocal returns true if user can migrate repository by local path.
-func (u *User) CanImportLocal() bool {
-	return conf.Repository.EnableLocalPathMigration && (u.IsAdmin || u.AllowImportLocal)
-}
-
-// DashboardLink returns the user dashboard page link.
-func (u *User) DashboardLink() string {
-	if u.IsOrganization() {
-		return conf.Server.Subpath + "/org/" + u.Name + "/dashboard/"
-	}
-	return conf.Server.Subpath + "/"
-}
-
-// HomeLink returns the user or organization home page link.
-func (u *User) HomeLink() string {
-	return conf.Server.Subpath + "/" + u.Name
-}
-
-func (u *User) HTMLURL() string {
-	return conf.Server.ExternalURL + u.Name
-}
-
-// GenerateEmailActivateCode generates an activate code based on user information and given e-mail.
-func (u *User) GenerateEmailActivateCode(email string) string {
-	code := tool.CreateTimeLimitCode(
-		com.ToStr(u.ID)+email+u.LowerName+u.Passwd+u.Rands,
-		conf.Auth.ActivateCodeLives, nil)
-
-	// Add tail hex username
-	code += hex.EncodeToString([]byte(u.LowerName))
-	return code
-}
-
-// GenerateActivateCode generates an activate code based on user information.
-func (u *User) GenerateActivateCode() string {
-	return u.GenerateEmailActivateCode(u.Email)
-}
-
-// CustomAvatarPath returns user custom avatar file path.
-func (u *User) CustomAvatarPath() string {
-	return filepath.Join(conf.Picture.AvatarUploadPath, com.ToStr(u.ID))
-}
-
-// GenerateRandomAvatar generates a random avatar for user.
-func (u *User) GenerateRandomAvatar() error {
-	seed := u.Email
-	if seed == "" {
-		seed = u.Name
-	}
-
-	img, err := avatar.RandomImage([]byte(seed))
-	if err != nil {
-		return fmt.Errorf("RandomImage: %v", err)
-	}
-	if err = os.MkdirAll(filepath.Dir(u.CustomAvatarPath()), os.ModePerm); err != nil {
-		return fmt.Errorf("MkdirAll: %v", err)
-	}
-	fw, err := os.Create(u.CustomAvatarPath())
-	if err != nil {
-		return fmt.Errorf("Create: %v", err)
-	}
-	defer fw.Close()
-
-	if err = png.Encode(fw, img); err != nil {
-		return fmt.Errorf("Encode: %v", err)
-	}
-
-	log.Info("New random avatar created: %d", u.ID)
-	return nil
-}
-
-// RelAvatarLink returns relative avatar link to the site domain,
-// which includes app sub-url as prefix. However, it is possible
-// to return full URL if user enables Gravatar-like service.
-func (u *User) RelAvatarLink() string {
-	defaultImgUrl := conf.Server.Subpath + "/img/avatar_default.png"
-	if u.ID == -1 {
-		return defaultImgUrl
-	}
-
-	switch {
-	case u.UseCustomAvatar:
-		if !com.IsExist(u.CustomAvatarPath()) {
-			return defaultImgUrl
-		}
-		return fmt.Sprintf("%s/%s/%d", conf.Server.Subpath, USER_AVATAR_URL_PREFIX, u.ID)
-	case conf.Picture.DisableGravatar:
-		if !com.IsExist(u.CustomAvatarPath()) {
-			if err := u.GenerateRandomAvatar(); err != nil {
-				log.Error("GenerateRandomAvatar: %v", err)
-			}
-		}
-
-		return fmt.Sprintf("%s/%s/%d", conf.Server.Subpath, USER_AVATAR_URL_PREFIX, u.ID)
-	}
-	return tool.AvatarLink(u.AvatarEmail)
-}
-
-// AvatarLink returns user avatar absolute link.
-func (u *User) AvatarLink() string {
-	link := u.RelAvatarLink()
-	if link[0] == '/' && link[1] != '/' {
-		return conf.Server.ExternalURL + strings.TrimPrefix(link, conf.Server.Subpath)[1:]
-	}
-	return link
 }
 
 // User.GetFollowers returns range of user's followers.
@@ -307,15 +100,15 @@ func (u *User) NewGitSig() *git.Signature {
 
 // EncodePassword encodes password to safe format.
 func (u *User) EncodePassword() {
-	newPasswd := pbkdf2.Key([]byte(u.Passwd), []byte(u.Salt), 10000, 50, sha256.New)
-	u.Passwd = fmt.Sprintf("%x", newPasswd)
+	newPasswd := pbkdf2.Key([]byte(u.Password), []byte(u.Salt), 10000, 50, sha256.New)
+	u.Password = fmt.Sprintf("%x", newPasswd)
 }
 
 // ValidatePassword checks if given password matches the one belongs to the user.
 func (u *User) ValidatePassword(passwd string) bool {
-	newUser := &User{Passwd: passwd, Salt: u.Salt}
+	newUser := &User{Password: passwd, Salt: u.Salt}
 	newUser.EncodePassword()
-	return subtle.ConstantTimeCompare([]byte(u.Passwd), []byte(newUser.Passwd)) == 1
+	return subtle.ConstantTimeCompare([]byte(u.Password), []byte(newUser.Password)) == 1
 }
 
 // UploadAvatar saves custom avatar for user.
@@ -327,7 +120,7 @@ func (u *User) UploadAvatar(data []byte) error {
 	}
 
 	_ = os.MkdirAll(conf.Picture.AvatarUploadPath, os.ModePerm)
-	fw, err := os.Create(u.CustomAvatarPath())
+	fw, err := os.Create(userutil.CustomAvatarPath(u.ID))
 	if err != nil {
 		return fmt.Errorf("create custom avatar directory: %v", err)
 	}
@@ -343,8 +136,9 @@ func (u *User) UploadAvatar(data []byte) error {
 
 // DeleteAvatar deletes the user's custom avatar.
 func (u *User) DeleteAvatar() error {
-	log.Trace("DeleteAvatar [%d]: %s", u.ID, u.CustomAvatarPath())
-	if err := os.Remove(u.CustomAvatarPath()); err != nil {
+	avatarPath := userutil.CustomAvatarPath(u.ID)
+	log.Trace("DeleteAvatar [%d]: %s", u.ID, avatarPath)
+	if err := os.Remove(avatarPath); err != nil {
 		return err
 	}
 
@@ -374,7 +168,7 @@ func (u *User) IsWriterOfRepo(repo *Repository) bool {
 
 // IsOrganization returns true if user is actually a organization.
 func (u *User) IsOrganization() bool {
-	return u.Type == UserOrganization
+	return u.Type == UserTypeOrganization
 }
 
 // IsUserOrgOwner returns true if user is in the owner team of given organization.
@@ -434,7 +228,7 @@ func (u *User) GetOrganizations(showPrivate bool) error {
 	}
 
 	u.Orgs = make([]*User, 0, len(orgIDs))
-	if err = x.Where("type = ?", UserOrganization).In("id", orgIDs).Find(&u.Orgs); err != nil {
+	if err = x.Where("type = ?", UserTypeOrganization).In("id", orgIDs).Find(&u.Orgs); err != nil {
 		return err
 	}
 	return nil
@@ -638,7 +432,7 @@ func VerifyUserActiveCode(code string) (user *User) {
 	if user = parseUserFromCode(code); user != nil {
 		// time limit code
 		prefix := code[:tool.TIME_LIMIT_CODE_LENGTH]
-		data := com.ToStr(user.ID) + user.Email + user.LowerName + user.Passwd + user.Rands
+		data := com.ToStr(user.ID) + user.Email + user.LowerName + user.Password + user.Rands
 
 		if tool.VerifyTimeLimitCode(data, minutes, prefix) {
 			return user
@@ -654,7 +448,7 @@ func VerifyActiveEmailCode(code, email string) *EmailAddress {
 	if user := parseUserFromCode(code); user != nil {
 		// time limit code
 		prefix := code[:tool.TIME_LIMIT_CODE_LENGTH]
-		data := com.ToStr(user.ID) + email + user.LowerName + user.Passwd + user.Rands
+		data := com.ToStr(user.ID) + email + user.LowerName + user.Password + user.Rands
 
 		if tool.VerifyTimeLimitCode(data, minutes, prefix) {
 			emailAddress := &EmailAddress{Email: email}
@@ -844,7 +638,7 @@ func deleteUser(e *xorm.Session, u *User) error {
 	//	so just keep error logs of those operations.
 
 	_ = os.RemoveAll(UserPath(u.Name))
-	_ = os.Remove(u.CustomAvatarPath())
+	_ = os.Remove(userutil.CustomAvatarPath(u.ID))
 
 	return nil
 }

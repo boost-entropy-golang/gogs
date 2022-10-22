@@ -16,6 +16,14 @@ func SetMockApp(t *testing.T, opts AppOpts) {
 	})
 }
 
+func SetMockAuth(t *testing.T, otps AuthOpts) {
+	before := Auth
+	Auth = otps
+	t.Cleanup(func() {
+		Auth = before
+	})
+}
+
 func SetMockServer(t *testing.T, opts ServerOpts) {
 	before := Server
 	Server = opts
@@ -45,5 +53,13 @@ func SetMockUI(t *testing.T, opts UIOpts) {
 	UI = opts
 	t.Cleanup(func() {
 		UI = before
+	})
+}
+
+func SetMockPicture(t *testing.T, opts PictureOpts) {
+	before := Picture
+	Picture = opts
+	t.Cleanup(func() {
+		Picture = before
 	})
 }

@@ -30,7 +30,7 @@ func Users(c *context.Context) {
 	c.Data["PageIsAdminUsers"] = true
 
 	route.RenderUserSearch(c, &route.UserSearchOptions{
-		Type:     db.UserIndividual,
+		Type:     db.UserTypeIndividual,
 		Counter:  db.CountUsers,
 		Ranger:   db.ListUsers,
 		PageSize: conf.UI.Admin.UserPagingNum,
@@ -79,7 +79,7 @@ func NewUserPost(c *context.Context, f form.AdminCrateUser) {
 	u := &db.User{
 		Name:     f.UserName,
 		Email:    f.Email,
-		Passwd:   f.Password,
+		Password: f.Password,
 		IsActive: true,
 	}
 
@@ -186,7 +186,7 @@ func EditUserPost(c *context.Context, f form.AdminEditUser) {
 	}
 
 	if len(f.Password) > 0 {
-		u.Passwd = f.Password
+		u.Password = f.Password
 		var err error
 		if u.Salt, err = db.GetUserSalt(); err != nil {
 			c.Error(err, "get user salt")
