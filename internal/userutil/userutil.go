@@ -5,15 +5,21 @@
 package userutil
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/nfnt/resize"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/pbkdf2"
 
 	"gogs.io/gogs/internal/avatar"
 	"gogs.io/gogs/internal/conf"
@@ -76,4 +82,43 @@ func GenerateRandomAvatar(userID int64, name, email string) error {
 		return errors.Wrap(err, "encode avatar image to file")
 	}
 	return nil
+}
+
+// SaveAvatar saves the given avatar for the user.
+func SaveAvatar(userID int64, data []byte) error {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return errors.Wrap(err, "decode image")
+	}
+
+	avatarPath := CustomAvatarPath(userID)
+	err = os.MkdirAll(filepath.Dir(avatarPath), os.ModePerm)
+	if err != nil {
+		return errors.Wrap(err, "create avatar directory")
+	}
+
+	f, err := os.Create(avatarPath)
+	if err != nil {
+		return errors.Wrap(err, "create avatar file")
+	}
+	defer func() { _ = f.Close() }()
+
+	m := resize.Resize(avatar.DefaultSize, avatar.DefaultSize, img, resize.NearestNeighbor)
+	if err = png.Encode(f, m); err != nil {
+		return errors.Wrap(err, "encode avatar image to file")
+	}
+	return nil
+}
+
+// EncodePassword encodes password using PBKDF2 SHA256 with given salt.
+func EncodePassword(password, salt string) string {
+	newPasswd := pbkdf2.Key([]byte(password), []byte(salt), 10000, 50, sha256.New)
+	return fmt.Sprintf("%x", newPasswd)
+}
+
+// ValidatePassword returns true if the given password matches the encoded
+// version with given salt.
+func ValidatePassword(encoded, salt, password string) bool {
+	got := EncodePassword(password, salt)
+	return subtle.ConstantTimeCompare([]byte(encoded), []byte(got)) == 1
 }

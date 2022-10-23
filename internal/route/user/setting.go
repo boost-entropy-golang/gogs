@@ -13,9 +13,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
-	"github.com/unknwon/com"
 	log "unknwon.dev/clog/v2"
 
 	"gogs.io/gogs/internal/auth"
@@ -23,7 +23,6 @@ import (
 	"gogs.io/gogs/internal/context"
 	"gogs.io/gogs/internal/cryptoutil"
 	"gogs.io/gogs/internal/db"
-	"gogs.io/gogs/internal/db/errors"
 	"gogs.io/gogs/internal/email"
 	"gogs.io/gogs/internal/form"
 	"gogs.io/gogs/internal/tool"
@@ -117,10 +116,15 @@ func SettingsPost(c *context.Context, f form.UpdateProfile) {
 
 // FIXME: limit upload size
 func UpdateAvatarSetting(c *context.Context, f form.Avatar, ctxUser *db.User) error {
-	ctxUser.UseCustomAvatar = f.Source == form.AVATAR_LOCAL
-	if len(f.Gravatar) > 0 {
+	if f.Source == form.AVATAR_BYMAIL && len(f.Gravatar) > 0 {
+		ctxUser.UseCustomAvatar = false
 		ctxUser.Avatar = cryptoutil.MD5(f.Gravatar)
 		ctxUser.AvatarEmail = f.Gravatar
+
+		if err := db.UpdateUser(ctxUser); err != nil {
+			return fmt.Errorf("update user: %v", err)
+		}
+		return nil
 	}
 
 	if f.Avatar != nil && f.Avatar.Filename != "" {
@@ -128,9 +132,7 @@ func UpdateAvatarSetting(c *context.Context, f form.Avatar, ctxUser *db.User) er
 		if err != nil {
 			return fmt.Errorf("open avatar reader: %v", err)
 		}
-		defer func() {
-			_ = r.Close()
-		}()
+		defer func() { _ = r.Close() }()
 
 		data, err := io.ReadAll(r)
 		if err != nil {
@@ -139,23 +141,13 @@ func UpdateAvatarSetting(c *context.Context, f form.Avatar, ctxUser *db.User) er
 		if !tool.IsImageFile(data) {
 			return errors.New(c.Tr("settings.uploaded_avatar_not_a_image"))
 		}
-		if err = ctxUser.UploadAvatar(data); err != nil {
-			return fmt.Errorf("upload avatar: %v", err)
-		}
-	} else {
-		// No avatar is uploaded but setting has been changed to enable,
-		// generate a random one when needed.
-		if ctxUser.UseCustomAvatar && !com.IsFile(userutil.CustomAvatarPath(ctxUser.ID)) {
-			if err := userutil.GenerateRandomAvatar(ctxUser.ID, ctxUser.Name, ctxUser.Email); err != nil {
-				log.Error("generate random avatar [%d]: %v", ctxUser.ID, err)
-			}
-		}
-	}
 
-	if err := db.UpdateUser(ctxUser); err != nil {
-		return fmt.Errorf("update user: %v", err)
+		err = db.Users.UseCustomAvatar(c.Req.Context(), ctxUser.ID, data)
+		if err != nil {
+			return errors.Wrap(err, "save avatar")
+		}
+		return nil
 	}
-
 	return nil
 }
 
@@ -176,7 +168,8 @@ func SettingsAvatarPost(c *context.Context, f form.Avatar) {
 }
 
 func SettingsDeleteAvatar(c *context.Context) {
-	if err := c.User.DeleteAvatar(); err != nil {
+	err := db.Users.DeleteCustomAvatar(c.Req.Context(), c.User.ID)
+	if err != nil {
 		c.Flash.Error(fmt.Sprintf("Failed to delete avatar: %v", err))
 	}
 
@@ -198,7 +191,7 @@ func SettingsPasswordPost(c *context.Context, f form.ChangePassword) {
 		return
 	}
 
-	if !c.User.ValidatePassword(f.OldPassword) {
+	if !userutil.ValidatePassword(c.User.Password, c.User.Salt, f.OldPassword) {
 		c.Flash.Error(c.Tr("settings.password_incorrect"))
 	} else if f.Password != f.Retype {
 		c.Flash.Error(c.Tr("form.password_not_match"))
@@ -209,7 +202,7 @@ func SettingsPasswordPost(c *context.Context, f form.ChangePassword) {
 			c.Errorf(err, "get user salt")
 			return
 		}
-		c.User.EncodePassword()
+		c.User.Password = userutil.EncodePassword(c.User.Password, c.User.Salt)
 		if err := db.UpdateUser(c.User); err != nil {
 			c.Errorf(err, "update user")
 			return
@@ -393,7 +386,7 @@ func SettingsSecurity(c *context.Context) {
 }
 
 func SettingsTwoFactorEnable(c *context.Context) {
-	if c.User.IsEnabledTwoFactor() {
+	if db.TwoFactors.IsEnabled(c.Req.Context(), c.User.ID) {
 		c.NotFound()
 		return
 	}
@@ -463,7 +456,7 @@ func SettingsTwoFactorEnablePost(c *context.Context) {
 }
 
 func SettingsTwoFactorRecoveryCodes(c *context.Context) {
-	if !c.User.IsEnabledTwoFactor() {
+	if !db.TwoFactors.IsEnabled(c.Req.Context(), c.User.ID) {
 		c.NotFound()
 		return
 	}
@@ -482,7 +475,7 @@ func SettingsTwoFactorRecoveryCodes(c *context.Context) {
 }
 
 func SettingsTwoFactorRecoveryCodesPost(c *context.Context) {
-	if !c.User.IsEnabledTwoFactor() {
+	if !db.TwoFactors.IsEnabled(c.Req.Context(), c.User.ID) {
 		c.NotFound()
 		return
 	}
@@ -497,7 +490,7 @@ func SettingsTwoFactorRecoveryCodesPost(c *context.Context) {
 }
 
 func SettingsTwoFactorDisable(c *context.Context) {
-	if !c.User.IsEnabledTwoFactor() {
+	if !db.TwoFactors.IsEnabled(c.Req.Context(), c.User.ID) {
 		c.NotFound()
 		return
 	}

@@ -7,16 +7,69 @@ package db
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"gogs.io/gogs/internal/auth"
 	"gogs.io/gogs/internal/dbtest"
 	"gogs.io/gogs/internal/errutil"
+	"gogs.io/gogs/internal/osutil"
+	"gogs.io/gogs/internal/userutil"
+	"gogs.io/gogs/public"
 )
+
+func TestUser_BeforeCreate(t *testing.T) {
+	now := time.Now()
+	db := &gorm.DB{
+		Config: &gorm.Config{
+			SkipDefaultTransaction: true,
+			NowFunc: func() time.Time {
+				return now
+			},
+		},
+	}
+
+	t.Run("CreatedUnix has been set", func(t *testing.T) {
+		user := &User{
+			CreatedUnix: 1,
+		}
+		_ = user.BeforeCreate(db)
+		assert.Equal(t, int64(1), user.CreatedUnix)
+		assert.Equal(t, int64(0), user.UpdatedUnix)
+	})
+
+	t.Run("CreatedUnix has not been set", func(t *testing.T) {
+		user := &User{}
+		_ = user.BeforeCreate(db)
+		assert.Equal(t, db.NowFunc().Unix(), user.CreatedUnix)
+		assert.Equal(t, db.NowFunc().Unix(), user.UpdatedUnix)
+	})
+}
+
+func TestUser_AfterFind(t *testing.T) {
+	now := time.Now()
+	db := &gorm.DB{
+		Config: &gorm.Config{
+			SkipDefaultTransaction: true,
+			NowFunc: func() time.Time {
+				return now
+			},
+		},
+	}
+
+	user := &User{
+		CreatedUnix: now.Unix(),
+		UpdatedUnix: now.Unix(),
+	}
+	_ = user.AfterFind(db)
+	assert.Equal(t, user.CreatedUnix, user.Created.Unix())
+	assert.Equal(t, user.UpdatedUnix, user.Updated.Unix())
+}
 
 func TestUsers(t *testing.T) {
 	if testing.Short() {
@@ -24,7 +77,7 @@ func TestUsers(t *testing.T) {
 	}
 	t.Parallel()
 
-	tables := []interface{}{new(User), new(EmailAddress), new(Repository)}
+	tables := []interface{}{new(User), new(EmailAddress), new(Repository), new(Follow)}
 	db := &users{
 		DB: dbtest.NewDB(t, "users", tables...),
 	}
@@ -35,10 +88,14 @@ func TestUsers(t *testing.T) {
 	}{
 		{"Authenticate", usersAuthenticate},
 		{"Create", usersCreate},
+		{"DeleteCustomAvatar", usersDeleteCustomAvatar},
 		{"GetByEmail", usersGetByEmail},
 		{"GetByID", usersGetByID},
 		{"GetByUsername", usersGetByUsername},
 		{"HasForkedRepository", usersHasForkedRepository},
+		{"ListFollowers", usersListFollowers},
+		{"ListFollowings", usersListFollowings},
+		{"UseCustomAvatar", usersUseCustomAvatar},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(func() {
@@ -184,6 +241,42 @@ func usersCreate(t *testing.T, db *users) {
 	assert.Equal(t, db.NowFunc().Format(time.RFC3339), user.Updated.UTC().Format(time.RFC3339))
 }
 
+func usersDeleteCustomAvatar(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	avatar, err := public.Files.ReadFile("img/avatar_default.png")
+	require.NoError(t, err)
+
+	avatarPath := userutil.CustomAvatarPath(alice.ID)
+	_ = os.Remove(avatarPath)
+	defer func() { _ = os.Remove(avatarPath) }()
+
+	err = db.UseCustomAvatar(ctx, alice.ID, avatar)
+	require.NoError(t, err)
+
+	// Make sure avatar is saved and the user flag is updated.
+	got := osutil.IsFile(avatarPath)
+	assert.True(t, got)
+
+	alice, err = db.GetByID(ctx, alice.ID)
+	require.NoError(t, err)
+	assert.True(t, alice.UseCustomAvatar)
+
+	// Delete avatar should remove the file and revert the user flag.
+	err = db.DeleteCustomAvatar(ctx, alice.ID)
+	require.NoError(t, err)
+
+	got = osutil.IsFile(avatarPath)
+	assert.False(t, got)
+
+	alice, err = db.GetByID(ctx, alice.ID)
+	require.NoError(t, err)
+	assert.False(t, alice.UseCustomAvatar)
+}
+
 func usersGetByEmail(t *testing.T, db *users) {
 	ctx := context.Background()
 
@@ -295,4 +388,97 @@ func usersHasForkedRepository(t *testing.T, db *users) {
 
 	has = db.HasForkedRepository(ctx, 1, 1)
 	assert.True(t, has)
+}
+
+func usersListFollowers(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	john, err := db.Create(ctx, "john", "john@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	got, err := db.ListFollowers(ctx, john.ID, 1, 1)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+	bob, err := db.Create(ctx, "bob", "bob@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	followsStore := NewFollowsStore(db.DB)
+	err = followsStore.Follow(ctx, alice.ID, john.ID)
+	require.NoError(t, err)
+	err = followsStore.Follow(ctx, bob.ID, john.ID)
+	require.NoError(t, err)
+
+	// First page only has bob
+	got, err = db.ListFollowers(ctx, john.ID, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, bob.ID, got[0].ID)
+
+	// Second page only has alice
+	got, err = db.ListFollowers(ctx, john.ID, 2, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, alice.ID, got[0].ID)
+}
+
+func usersListFollowings(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	john, err := db.Create(ctx, "john", "john@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	got, err := db.ListFollowers(ctx, john.ID, 1, 1)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+	bob, err := db.Create(ctx, "bob", "bob@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	followsStore := NewFollowsStore(db.DB)
+	err = followsStore.Follow(ctx, john.ID, alice.ID)
+	require.NoError(t, err)
+	err = followsStore.Follow(ctx, john.ID, bob.ID)
+	require.NoError(t, err)
+
+	// First page only has bob
+	got, err = db.ListFollowings(ctx, john.ID, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, bob.ID, got[0].ID)
+
+	// Second page only has alice
+	got, err = db.ListFollowings(ctx, john.ID, 2, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, alice.ID, got[0].ID)
+}
+
+func usersUseCustomAvatar(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	avatar, err := public.Files.ReadFile("img/avatar_default.png")
+	require.NoError(t, err)
+
+	avatarPath := userutil.CustomAvatarPath(alice.ID)
+	_ = os.Remove(avatarPath)
+	defer func() { _ = os.Remove(avatarPath) }()
+
+	err = db.UseCustomAvatar(ctx, alice.ID, avatar)
+	require.NoError(t, err)
+
+	// Make sure avatar is saved and the user flag is updated.
+	got := osutil.IsFile(avatarPath)
+	assert.True(t, got)
+
+	alice, err = db.GetByID(ctx, alice.ID)
+	require.NoError(t, err)
+	assert.True(t, alice.UseCustomAvatar)
 }

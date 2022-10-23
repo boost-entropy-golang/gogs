@@ -5,30 +5,22 @@
 package db
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
-	"image"
 	_ "image/jpeg"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/nfnt/resize"
 	"github.com/unknwon/com"
-	"golang.org/x/crypto/pbkdf2"
 	log "unknwon.dev/clog/v2"
 	"xorm.io/xorm"
 
 	"github.com/gogs/git-module"
 
-	"gogs.io/gogs/internal/avatar"
 	"gogs.io/gogs/internal/conf"
 	"gogs.io/gogs/internal/db/errors"
 	"gogs.io/gogs/internal/errutil"
@@ -59,131 +51,6 @@ func (u *User) AfterSet(colName string, _ xorm.Cell) {
 	case "updated_unix":
 		u.Updated = time.Unix(u.UpdatedUnix, 0).Local()
 	}
-}
-
-// User.GetFollowers returns range of user's followers.
-func (u *User) GetFollowers(page int) ([]*User, error) {
-	users := make([]*User, 0, ItemsPerPage)
-	sess := x.Limit(ItemsPerPage, (page-1)*ItemsPerPage).Where("follow.follow_id=?", u.ID)
-	if conf.UsePostgreSQL {
-		sess = sess.Join("LEFT", "follow", `"user".id=follow.user_id`)
-	} else {
-		sess = sess.Join("LEFT", "follow", "user.id=follow.user_id")
-	}
-	return users, sess.Find(&users)
-}
-
-func (u *User) IsFollowing(followID int64) bool {
-	return IsFollowing(u.ID, followID)
-}
-
-// GetFollowing returns range of user's following.
-func (u *User) GetFollowing(page int) ([]*User, error) {
-	users := make([]*User, 0, ItemsPerPage)
-	sess := x.Limit(ItemsPerPage, (page-1)*ItemsPerPage).Where("follow.user_id=?", u.ID)
-	if conf.UsePostgreSQL {
-		sess = sess.Join("LEFT", "follow", `"user".id=follow.follow_id`)
-	} else {
-		sess = sess.Join("LEFT", "follow", "user.id=follow.follow_id")
-	}
-	return users, sess.Find(&users)
-}
-
-// NewGitSig generates and returns the signature of given user.
-func (u *User) NewGitSig() *git.Signature {
-	return &git.Signature{
-		Name:  u.DisplayName(),
-		Email: u.Email,
-		When:  time.Now(),
-	}
-}
-
-// EncodePassword encodes password to safe format.
-func (u *User) EncodePassword() {
-	newPasswd := pbkdf2.Key([]byte(u.Password), []byte(u.Salt), 10000, 50, sha256.New)
-	u.Password = fmt.Sprintf("%x", newPasswd)
-}
-
-// ValidatePassword checks if given password matches the one belongs to the user.
-func (u *User) ValidatePassword(passwd string) bool {
-	newUser := &User{Password: passwd, Salt: u.Salt}
-	newUser.EncodePassword()
-	return subtle.ConstantTimeCompare([]byte(u.Password), []byte(newUser.Password)) == 1
-}
-
-// UploadAvatar saves custom avatar for user.
-// FIXME: split uploads to different subdirs in case we have massive number of users.
-func (u *User) UploadAvatar(data []byte) error {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("decode image: %v", err)
-	}
-
-	_ = os.MkdirAll(conf.Picture.AvatarUploadPath, os.ModePerm)
-	fw, err := os.Create(userutil.CustomAvatarPath(u.ID))
-	if err != nil {
-		return fmt.Errorf("create custom avatar directory: %v", err)
-	}
-	defer fw.Close()
-
-	m := resize.Resize(avatar.AVATAR_SIZE, avatar.AVATAR_SIZE, img, resize.NearestNeighbor)
-	if err = png.Encode(fw, m); err != nil {
-		return fmt.Errorf("encode image: %v", err)
-	}
-
-	return nil
-}
-
-// DeleteAvatar deletes the user's custom avatar.
-func (u *User) DeleteAvatar() error {
-	avatarPath := userutil.CustomAvatarPath(u.ID)
-	log.Trace("DeleteAvatar [%d]: %s", u.ID, avatarPath)
-	if err := os.Remove(avatarPath); err != nil {
-		return err
-	}
-
-	u.UseCustomAvatar = false
-	return UpdateUser(u)
-}
-
-// IsAdminOfRepo returns true if user has admin or higher access of repository.
-func (u *User) IsAdminOfRepo(repo *Repository) bool {
-	return Perms.Authorize(context.TODO(), u.ID, repo.ID, AccessModeAdmin,
-		AccessModeOptions{
-			OwnerID: repo.OwnerID,
-			Private: repo.IsPrivate,
-		},
-	)
-}
-
-// IsWriterOfRepo returns true if user has write access to given repository.
-func (u *User) IsWriterOfRepo(repo *Repository) bool {
-	return Perms.Authorize(context.TODO(), u.ID, repo.ID, AccessModeWrite,
-		AccessModeOptions{
-			OwnerID: repo.OwnerID,
-			Private: repo.IsPrivate,
-		},
-	)
-}
-
-// IsOrganization returns true if user is actually a organization.
-func (u *User) IsOrganization() bool {
-	return u.Type == UserTypeOrganization
-}
-
-// IsUserOrgOwner returns true if user is in the owner team of given organization.
-func (u *User) IsUserOrgOwner(orgId int64) bool {
-	return IsOrganizationOwner(orgId, u.ID)
-}
-
-// IsPublicMember returns true if user public his/her membership in give organization.
-func (u *User) IsPublicMember(orgId int64) bool {
-	return IsPublicMembership(orgId, u.ID)
-}
-
-// IsEnabledTwoFactor returns true if user has enabled two-factor authentication.
-func (u *User) IsEnabledTwoFactor() bool {
-	return TwoFactors.IsUserEnabled(context.TODO(), u.ID)
 }
 
 func (u *User) getOrganizationCount(e Engine) (int64, error) {
@@ -371,7 +238,7 @@ func CreateUser(u *User) (err error) {
 	if u.Salt, err = GetUserSalt(); err != nil {
 		return err
 	}
-	u.EncodePassword()
+	u.Password = userutil.EncodePassword(u.Password, u.Salt)
 	u.MaxRepoCreation = -1
 
 	sess := x.NewSession()
@@ -885,77 +752,6 @@ func SearchUserByName(opts *SearchUserOptions) (users []*User, _ int64, _ error)
 		sess.OrderBy(opts.OrderBy)
 	}
 	return users, count, sess.Limit(opts.PageSize, (opts.Page-1)*opts.PageSize).Find(&users)
-}
-
-// ___________    .__  .__
-// \_   _____/___ |  | |  |   ______  _  __
-//  |    __)/  _ \|  | |  |  /  _ \ \/ \/ /
-//  |     \(  <_> )  |_|  |_(  <_> )     /
-//  \___  / \____/|____/____/\____/ \/\_/
-//      \/
-
-// Follow represents relations of user and his/her followers.
-type Follow struct {
-	ID       int64
-	UserID   int64 `xorm:"UNIQUE(follow)"`
-	FollowID int64 `xorm:"UNIQUE(follow)"`
-}
-
-func IsFollowing(userID, followID int64) bool {
-	has, _ := x.Get(&Follow{UserID: userID, FollowID: followID})
-	return has
-}
-
-// FollowUser marks someone be another's follower.
-func FollowUser(userID, followID int64) (err error) {
-	if userID == followID || IsFollowing(userID, followID) {
-		return nil
-	}
-
-	sess := x.NewSession()
-	defer sess.Close()
-	if err = sess.Begin(); err != nil {
-		return err
-	}
-
-	if _, err = sess.Insert(&Follow{UserID: userID, FollowID: followID}); err != nil {
-		return err
-	}
-
-	if _, err = sess.Exec("UPDATE `user` SET num_followers = num_followers + 1 WHERE id = ?", followID); err != nil {
-		return err
-	}
-
-	if _, err = sess.Exec("UPDATE `user` SET num_following = num_following + 1 WHERE id = ?", userID); err != nil {
-		return err
-	}
-	return sess.Commit()
-}
-
-// UnfollowUser unmarks someone be another's follower.
-func UnfollowUser(userID, followID int64) (err error) {
-	if userID == followID || !IsFollowing(userID, followID) {
-		return nil
-	}
-
-	sess := x.NewSession()
-	defer sess.Close()
-	if err = sess.Begin(); err != nil {
-		return err
-	}
-
-	if _, err = sess.Delete(&Follow{UserID: userID, FollowID: followID}); err != nil {
-		return err
-	}
-
-	if _, err = sess.Exec("UPDATE `user` SET num_followers = num_followers - 1 WHERE id = ?", followID); err != nil {
-		return err
-	}
-
-	if _, err = sess.Exec("UPDATE `user` SET num_following = num_following - 1 WHERE id = ?", userID); err != nil {
-		return err
-	}
-	return sess.Commit()
 }
 
 // GetRepositoryAccesses finds all repositories with their access mode where a user has access but does not own.

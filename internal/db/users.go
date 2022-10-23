@@ -7,6 +7,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -45,6 +46,9 @@ type UsersStore interface {
 	// ErrUserAlreadyExist when a user with same name already exists, or
 	// ErrEmailAlreadyUsed if the email has been used by another user.
 	Create(ctx context.Context, username, email string, opts CreateUserOptions) (*User, error)
+	// DeleteCustomAvatar deletes the current user custom avatar and falls back to
+	// use look up avatar by email.
+	DeleteCustomAvatar(ctx context.Context, userID int64) error
 	// GetByEmail returns the user (not organization) with given email. It ignores
 	// records with unverified emails and returns ErrUserNotExist when not found.
 	GetByEmail(ctx context.Context, email string) (*User, error)
@@ -56,6 +60,16 @@ type UsersStore interface {
 	GetByUsername(ctx context.Context, username string) (*User, error)
 	// HasForkedRepository returns true if the user has forked given repository.
 	HasForkedRepository(ctx context.Context, userID, repoID int64) bool
+	// ListFollowers returns a list of users that are following the given user.
+	// Results are paginated by given page and page size, and sorted by the time of
+	// follow in descending order.
+	ListFollowers(ctx context.Context, userID int64, page, pageSize int) ([]*User, error)
+	// ListFollowings returns a list of users that are followed by the given user.
+	// Results are paginated by given page and page size, and sorted by the time of
+	// follow in descending order.
+	ListFollowings(ctx context.Context, userID int64, page, pageSize int) ([]*User, error)
+	// UseCustomAvatar uses the given avatar as the user custom avatar.
+	UseCustomAvatar(ctx context.Context, userID int64, avatar []byte) error
 }
 
 var Users UsersStore
@@ -109,7 +123,7 @@ func (db *users) Authenticate(ctx context.Context, login, password string, login
 
 		// Validate password hash fetched from database for local accounts.
 		if user.IsLocal() {
-			if user.ValidatePassword(password) {
+			if userutil.ValidatePassword(user.Password, user.Salt, password) {
 				return user, nil
 			}
 
@@ -254,9 +268,21 @@ func (db *users) Create(ctx context.Context, username, email string, opts Create
 	if err != nil {
 		return nil, err
 	}
-	user.EncodePassword()
+	user.Password = userutil.EncodePassword(user.Password, user.Salt)
 
 	return user, db.WithContext(ctx).Create(user).Error
+}
+
+func (db *users) DeleteCustomAvatar(ctx context.Context, userID int64) error {
+	_ = os.Remove(userutil.CustomAvatarPath(userID))
+	return db.WithContext(ctx).
+		Model(&User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"use_custom_avatar": false,
+			"updated_unix":      db.NowFunc().Unix(),
+		}).
+		Error
 }
 
 var _ errutil.NotFound = (*ErrUserNotExist)(nil)
@@ -343,6 +369,68 @@ func (db *users) HasForkedRepository(ctx context.Context, userID, repoID int64) 
 	return count > 0
 }
 
+func (db *users) ListFollowers(ctx context.Context, userID int64, page, pageSize int) ([]*User, error) {
+	/*
+		Equivalent SQL for PostgreSQL:
+
+		SELECT * FROM "user"
+		LEFT JOIN follow ON follow.user_id = "user".id
+		WHERE follow.follow_id = @userID
+		ORDER BY follow.id DESC
+		LIMIT @limit OFFSET @offset
+	*/
+	users := make([]*User, 0, pageSize)
+	tx := db.WithContext(ctx).
+		Where("follow.follow_id = ?", userID).
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Order("follow.id DESC")
+	if conf.UsePostgreSQL {
+		tx.Joins(`LEFT JOIN follow ON follow.user_id = "user".id`)
+	} else {
+		tx.Joins(`LEFT JOIN follow ON follow.user_id = user.id`)
+	}
+	return users, tx.Find(&users).Error
+}
+
+func (db *users) ListFollowings(ctx context.Context, userID int64, page, pageSize int) ([]*User, error) {
+	/*
+		Equivalent SQL for PostgreSQL:
+
+		SELECT * FROM "user"
+		LEFT JOIN follow ON follow.user_id = "user".id
+		WHERE follow.user_id = @userID
+		ORDER BY follow.id DESC
+		LIMIT @limit OFFSET @offset
+	*/
+	users := make([]*User, 0, pageSize)
+	tx := db.WithContext(ctx).
+		Where("follow.user_id = ?", userID).
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Order("follow.id DESC")
+	if conf.UsePostgreSQL {
+		tx.Joins(`LEFT JOIN follow ON follow.follow_id = "user".id`)
+	} else {
+		tx.Joins(`LEFT JOIN follow ON follow.follow_id = user.id`)
+	}
+	return users, tx.Find(&users).Error
+}
+
+func (db *users) UseCustomAvatar(ctx context.Context, userID int64, avatar []byte) error {
+	err := userutil.SaveAvatar(userID, avatar)
+	if err != nil {
+		return errors.Wrap(err, "save avatar")
+	}
+
+	return db.WithContext(ctx).
+		Model(&User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"use_custom_avatar": true,
+			"updated_unix":      db.NowFunc().Unix(),
+		}).
+		Error
+}
+
 // UserType indicates the type of the user account.
 type UserType int
 
@@ -423,9 +511,14 @@ func (u *User) AfterFind(_ *gorm.DB) error {
 	return nil
 }
 
-// IsLocal returns true if user is created as local account.
+// IsLocal returns true if the user is created as local account.
 func (u *User) IsLocal() bool {
 	return u.LoginSource <= 0
+}
+
+// IsOrganization returns true if the user is an organization.
+func (u *User) IsOrganization() bool {
+	return u.Type == UserTypeOrganization
 }
 
 // APIFormat returns the API format of a user.
@@ -529,4 +622,30 @@ func (u *User) AvatarURL() string {
 		return conf.Server.ExternalURL + strings.TrimPrefix(link, conf.Server.Subpath)[1:]
 	}
 	return link
+}
+
+// IsFollowing returns true if the user is following the given user.
+//
+// TODO(unknwon): This is also used in templates, which should be fixed by
+// having a dedicated type `template.User`.
+func (u *User) IsFollowing(followID int64) bool {
+	return Follows.IsFollowing(context.TODO(), u.ID, followID)
+}
+
+// IsUserOrgOwner returns true if the user is in the owner team of the given
+// organization.
+//
+// TODO(unknwon): This is also used in templates, which should be fixed by
+// having a dedicated type `template.User`.
+func (u *User) IsUserOrgOwner(orgId int64) bool {
+	return IsOrganizationOwner(orgId, u.ID)
+}
+
+// IsPublicMember returns true if the user has public membership of the given
+// organization.
+//
+// TODO(unknwon): This is also used in templates, which should be fixed by
+// having a dedicated type `template.User`.
+func (u *User) IsPublicMember(orgId int64) bool {
+	return IsPublicMembership(orgId, u.ID)
 }
