@@ -36,7 +36,7 @@ require (
 	github.com/russross/blackfriday v1.6.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/sergi/go-diff v1.2.0
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.1
 	github.com/unknwon/cae v1.0.2
 	github.com/unknwon/com v1.0.1
 	github.com/unknwon/i18n v0.0.0-20190805065654-5c6446a380b6
@@ -50,10 +50,10 @@ require (
 	gopkg.in/ini.v1 v1.67.0
 	gopkg.in/macaron.v1 v1.4.0
 	gorm.io/driver/mysql v1.4.3
-	gorm.io/driver/postgres v1.4.4
+	gorm.io/driver/postgres v1.4.5
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/driver/sqlserver v1.4.1
-	gorm.io/gorm v1.24.0
+	gorm.io/gorm v1.24.1-0.20221019064659-5dd2bb482755
 	modernc.org/sqlite v1.19.2
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
