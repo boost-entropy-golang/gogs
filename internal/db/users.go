@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-macaron/binding"
 	api "github.com/gogs/go-gogs-client"
@@ -44,6 +45,8 @@ type UsersStore interface {
 	// When the "loginSourceID" is positive, it tries to authenticate via given
 	// login source and creates a new user when not yet exists in the database.
 	Authenticate(ctx context.Context, username, password string, loginSourceID int64) (*User, error)
+	// Count returns the total number of users.
+	Count(ctx context.Context) int64
 	// Create creates a new user and persists to database. It returns
 	// ErrUserAlreadyExist when a user with same name already exists, or
 	// ErrEmailAlreadyUsed if the email has been used by another user.
@@ -62,6 +65,11 @@ type UsersStore interface {
 	GetByUsername(ctx context.Context, username string) (*User, error)
 	// HasForkedRepository returns true if the user has forked given repository.
 	HasForkedRepository(ctx context.Context, userID, repoID int64) bool
+	// IsUsernameUsed returns true if the given username has been used.
+	IsUsernameUsed(ctx context.Context, username string) bool
+	// List returns a list of users. Results are paginated by given page and page
+	// size, and sorted by primary key (id) in ascending order.
+	List(ctx context.Context, page, pageSize int) ([]*User, error)
 	// ListFollowers returns a list of users that are following the given user.
 	// Results are paginated by given page and page size, and sorted by the time of
 	// follow in descending order.
@@ -180,6 +188,12 @@ func (db *users) Authenticate(ctx context.Context, login, password string, login
 	)
 }
 
+func (db *users) Count(ctx context.Context) int64 {
+	var count int64
+	db.WithContext(ctx).Model(&User{}).Where("type = ?", UserTypeIndividual).Count(&count)
+	return count
+}
+
 type CreateUserOptions struct {
 	FullName    string
 	Password    string
@@ -231,16 +245,22 @@ func (db *users) Create(ctx context.Context, username, email string, opts Create
 		return nil, err
 	}
 
-	_, err = db.GetByUsername(ctx, username)
-	if err == nil {
-		return nil, ErrUserAlreadyExist{args: errutil.Args{"name": username}}
-	} else if !IsErrUserNotExist(err) {
-		return nil, err
+	if db.IsUsernameUsed(ctx, username) {
+		return nil, ErrUserAlreadyExist{
+			args: errutil.Args{
+				"name": username,
+			},
+		}
 	}
 
+	email = strings.ToLower(email)
 	_, err = db.GetByEmail(ctx, email)
 	if err == nil {
-		return nil, ErrEmailAlreadyUsed{args: errutil.Args{"email": email}}
+		return nil, ErrEmailAlreadyUsed{
+			args: errutil.Args{
+				"email": email,
+			},
+		}
 	} else if !IsErrUserNotExist(err) {
 		return nil, err
 	}
@@ -258,15 +278,15 @@ func (db *users) Create(ctx context.Context, username, email string, opts Create
 		MaxRepoCreation: -1,
 		IsActive:        opts.Activated,
 		IsAdmin:         opts.Admin,
-		Avatar:          cryptoutil.MD5(email),
+		Avatar:          cryptoutil.MD5(email), // Gravatar URL uses the MD5 hash of the email, see https://en.gravatar.com/site/implement/hash/
 		AvatarEmail:     email,
 	}
 
-	user.Rands, err = GetUserSalt()
+	user.Rands, err = userutil.RandomSalt()
 	if err != nil {
 		return nil, err
 	}
-	user.Salt, err = GetUserSalt()
+	user.Salt, err = userutil.RandomSalt()
 	if err != nil {
 		return nil, err
 	}
@@ -307,11 +327,10 @@ func (ErrUserNotExist) NotFound() bool {
 }
 
 func (db *users) GetByEmail(ctx context.Context, email string) (*User, error) {
-	email = strings.ToLower(email)
-
 	if email == "" {
 		return nil, ErrUserNotExist{args: errutil.Args{"email": email}}
 	}
+	email = strings.ToLower(email)
 
 	// First try to find the user by primary email
 	user := new(User)
@@ -338,7 +357,7 @@ func (db *users) GetByEmail(ctx context.Context, email string) (*User, error) {
 		return nil, err
 	}
 
-	return db.GetByID(ctx, emailAddress.UID)
+	return db.GetByID(ctx, emailAddress.UserID)
 }
 
 func (db *users) GetByID(ctx context.Context, id int64) (*User, error) {
@@ -369,6 +388,27 @@ func (db *users) HasForkedRepository(ctx context.Context, userID, repoID int64) 
 	var count int64
 	db.WithContext(ctx).Model(new(Repository)).Where("owner_id = ? AND fork_id = ?", userID, repoID).Count(&count)
 	return count > 0
+}
+
+func (db *users) IsUsernameUsed(ctx context.Context, username string) bool {
+	if username == "" {
+		return false
+	}
+	return db.WithContext(ctx).
+		Select("id").
+		Where("lower_name = ?", strings.ToLower(username)).
+		First(&User{}).
+		Error != gorm.ErrRecordNotFound
+}
+
+func (db *users) List(ctx context.Context, page, pageSize int) ([]*User, error) {
+	users := make([]*User, 0, pageSize)
+	return users, db.WithContext(ctx).
+		Where("type = ?", UserTypeIndividual).
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Order("id ASC").
+		Find(&users).
+		Error
 }
 
 func (db *users) ListFollowers(ctx context.Context, userID int64, page, pageSize int) ([]*User, error) {
@@ -672,4 +712,120 @@ func (u *User) GetOrganizationCount() (int64, error) {
 // having a dedicated type `template.User`.
 func (u *User) ShortName(length int) string {
 	return strutil.Ellipsis(u.Name, length)
+}
+
+// NewGhostUser creates and returns a fake user for people who has deleted their
+// accounts.
+//
+// TODO: Once migrated to unknwon.dev/i18n, pass in the `i18n.Locale` to
+// translate the text to local language.
+func NewGhostUser() *User {
+	return &User{
+		ID:        -1,
+		Name:      "Ghost",
+		LowerName: "ghost",
+	}
+}
+
+var (
+	reservedUsernames = map[string]struct{}{
+		"-":        {},
+		"explore":  {},
+		"create":   {},
+		"assets":   {},
+		"css":      {},
+		"img":      {},
+		"js":       {},
+		"less":     {},
+		"plugins":  {},
+		"debug":    {},
+		"raw":      {},
+		"install":  {},
+		"api":      {},
+		"avatar":   {},
+		"user":     {},
+		"org":      {},
+		"help":     {},
+		"stars":    {},
+		"issues":   {},
+		"pulls":    {},
+		"commits":  {},
+		"repo":     {},
+		"template": {},
+		"admin":    {},
+		"new":      {},
+		".":        {},
+		"..":       {},
+	}
+	reservedUsernamePatterns = []string{"*.keys"}
+)
+
+type ErrNameNotAllowed struct {
+	args errutil.Args
+}
+
+func IsErrNameNotAllowed(err error) bool {
+	_, ok := err.(ErrNameNotAllowed)
+	return ok
+}
+
+func (err ErrNameNotAllowed) Value() string {
+	val, ok := err.args["name"].(string)
+	if ok {
+		return val
+	}
+
+	val, ok = err.args["pattern"].(string)
+	if ok {
+		return val
+	}
+
+	return "<value not found>"
+}
+
+func (err ErrNameNotAllowed) Error() string {
+	return fmt.Sprintf("name is not allowed: %v", err.args)
+}
+
+// isNameAllowed checks if the name is reserved or pattern of the name is not
+// allowed based on given reserved names and patterns. Names are exact match,
+// patterns can be prefix or suffix match with the wildcard ("*").
+func isNameAllowed(names map[string]struct{}, patterns []string, name string) error {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if utf8.RuneCountInString(name) == 0 {
+		return ErrNameNotAllowed{
+			args: errutil.Args{
+				"reason": "empty name",
+			},
+		}
+	}
+
+	if _, ok := names[name]; ok {
+		return ErrNameNotAllowed{
+			args: errutil.Args{
+				"reason": "reserved",
+				"name":   name,
+			},
+		}
+	}
+
+	for _, pattern := range patterns {
+		if pattern[0] == '*' && strings.HasSuffix(name, pattern[1:]) ||
+			(pattern[len(pattern)-1] == '*' && strings.HasPrefix(name, pattern[:len(pattern)-1])) {
+			return ErrNameNotAllowed{
+				args: errutil.Args{
+					"reason":  "reserved",
+					"pattern": pattern,
+				},
+			}
+		}
+	}
+
+	return nil
+}
+
+// isUsernameAllowed returns ErrNameNotAllowed if the given name or pattern of
+// the name is not allowed as a username.
+func isUsernameAllowed(name string) error {
+	return isNameAllowed(reservedUsernames, reservedUsernamePatterns, name)
 }

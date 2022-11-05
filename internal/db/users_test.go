@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"gogs.io/gogs/internal/auth"
 	"gogs.io/gogs/internal/dbtest"
+	"gogs.io/gogs/internal/dbutil"
 	"gogs.io/gogs/internal/errutil"
 	"gogs.io/gogs/internal/osutil"
 	"gogs.io/gogs/internal/userutil"
@@ -87,12 +89,15 @@ func TestUsers(t *testing.T) {
 		test func(t *testing.T, db *users)
 	}{
 		{"Authenticate", usersAuthenticate},
+		{"Count", usersCount},
 		{"Create", usersCreate},
 		{"DeleteCustomAvatar", usersDeleteCustomAvatar},
 		{"GetByEmail", usersGetByEmail},
 		{"GetByID", usersGetByID},
 		{"GetByUsername", usersGetByUsername},
 		{"HasForkedRepository", usersHasForkedRepository},
+		{"IsUsernameUsed", usersIsUsernameUsed},
+		{"List", usersList},
 		{"ListFollowers", usersListFollowers},
 		{"ListFollowings", usersListFollowings},
 		{"UseCustomAvatar", usersUseCustomAvatar},
@@ -207,10 +212,38 @@ func usersAuthenticate(t *testing.T, db *users) {
 	})
 }
 
+func usersCount(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	// Has no user initially
+	got := db.Count(ctx)
+	assert.Equal(t, int64(0), got)
+
+	_, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+	got = db.Count(ctx)
+	assert.Equal(t, int64(1), got)
+
+	// Create an organization shouldn't count
+	// TODO: Use Orgs.Create to replace SQL hack when the method is available.
+	org1, err := db.Create(ctx, "org1", "org1@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+	err = db.Exec(
+		dbutil.Quote("UPDATE %s SET type = ? WHERE id = ?", "user"),
+		UserTypeOrganization, org1.ID,
+	).Error
+	require.NoError(t, err)
+	got = db.Count(ctx)
+	assert.Equal(t, int64(1), got)
+}
+
 func usersCreate(t *testing.T, db *users) {
 	ctx := context.Background()
 
-	alice, err := db.Create(ctx, "alice", "alice@example.com",
+	alice, err := db.Create(
+		ctx,
+		"alice",
+		"alice@example.com",
 		CreateUserOptions{
 			Activated: true,
 		},
@@ -219,19 +252,32 @@ func usersCreate(t *testing.T, db *users) {
 
 	t.Run("name not allowed", func(t *testing.T) {
 		_, err := db.Create(ctx, "-", "", CreateUserOptions{})
-		wantErr := ErrNameNotAllowed{args: errutil.Args{"reason": "reserved", "name": "-"}}
+		wantErr := ErrNameNotAllowed{
+			args: errutil.Args{
+				"reason": "reserved",
+				"name":   "-",
+			},
+		}
 		assert.Equal(t, wantErr, err)
 	})
 
 	t.Run("name already exists", func(t *testing.T) {
 		_, err := db.Create(ctx, alice.Name, "", CreateUserOptions{})
-		wantErr := ErrUserAlreadyExist{args: errutil.Args{"name": alice.Name}}
+		wantErr := ErrUserAlreadyExist{
+			args: errutil.Args{
+				"name": alice.Name,
+			},
+		}
 		assert.Equal(t, wantErr, err)
 	})
 
 	t.Run("email already exists", func(t *testing.T) {
 		_, err := db.Create(ctx, "bob", alice.Email, CreateUserOptions{})
-		wantErr := ErrEmailAlreadyUsed{args: errutil.Args{"email": alice.Email}}
+		wantErr := ErrEmailAlreadyUsed{
+			args: errutil.Args{
+				"email": alice.Email,
+			},
+		}
 		assert.Equal(t, wantErr, err)
 	})
 
@@ -390,6 +436,53 @@ func usersHasForkedRepository(t *testing.T, db *users) {
 	assert.True(t, has)
 }
 
+func usersIsUsernameUsed(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	got := db.IsUsernameUsed(ctx, alice.Name)
+	assert.True(t, got)
+	got = db.IsUsernameUsed(ctx, "bob")
+	assert.False(t, got)
+}
+
+func usersList(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+	bob, err := db.Create(ctx, "bob", "bob@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	// Create an organization shouldn't count
+	// TODO: Use Orgs.Create to replace SQL hack when the method is available.
+	org1, err := db.Create(ctx, "org1", "org1@example.com", CreateUserOptions{})
+	require.NoError(t, err)
+	err = db.Exec(
+		dbutil.Quote("UPDATE %s SET type = ? WHERE id = ?", "user"),
+		UserTypeOrganization, org1.ID,
+	).Error
+	require.NoError(t, err)
+
+	got, err := db.List(ctx, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, alice.ID, got[0].ID)
+
+	got, err = db.List(ctx, 2, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, bob.ID, got[0].ID)
+
+	got, err = db.List(ctx, 1, 3)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, alice.ID, got[0].ID)
+	assert.Equal(t, bob.ID, got[1].ID)
+}
+
 func usersListFollowers(t *testing.T, db *users) {
 	ctx := context.Background()
 
@@ -481,4 +574,19 @@ func usersUseCustomAvatar(t *testing.T, db *users) {
 	alice, err = db.GetByID(ctx, alice.ID)
 	require.NoError(t, err)
 	assert.True(t, alice.UseCustomAvatar)
+}
+
+func TestIsUsernameAllowed(t *testing.T) {
+	for name := range reservedUsernames {
+		t.Run(name, func(t *testing.T) {
+			assert.True(t, IsErrNameNotAllowed(isUsernameAllowed(name)))
+		})
+	}
+
+	for _, pattern := range reservedUsernamePatterns {
+		t.Run(pattern, func(t *testing.T) {
+			username := strings.ReplaceAll(pattern, "*", "alice")
+			assert.True(t, IsErrNameNotAllowed(isUsernameAllowed(username)))
+		})
+	}
 }

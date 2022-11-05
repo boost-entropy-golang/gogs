@@ -5,11 +5,15 @@
 package user
 
 import (
+	gocontext "context"
+	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
 
 	"github.com/go-macaron/captcha"
 	"github.com/pkg/errors"
+	"github.com/unknwon/com"
 	log "unknwon.dev/clog/v2"
 
 	"gogs.io/gogs/internal/auth"
@@ -53,7 +57,7 @@ func AutoLogin(c *context.Context) (bool, error) {
 		}
 	}()
 
-	u, err := db.GetUserByName(uname)
+	u, err := db.Users.GetByUsername(c.Req.Context(), uname)
 	if err != nil {
 		if !db.IsErrUserNotExist(err) {
 			return false, fmt.Errorf("get user by name: %v", err)
@@ -228,7 +232,7 @@ func LoginTwoFactorPost(c *context.Context) {
 		return
 	}
 
-	u, err := db.GetUserByID(userID)
+	u, err := db.Users.GetByID(c.Req.Context(), userID)
 	if err != nil {
 		c.Error(err, "get user by ID")
 		return
@@ -274,7 +278,7 @@ func LoginTwoFactorRecoveryCodePost(c *context.Context) {
 		return
 	}
 
-	u, err := db.GetUserByID(userID)
+	u, err := db.Users.GetByID(c.Req.Context(), userID)
 	if err != nil {
 		c.Error(err, "get user by ID")
 		return
@@ -311,7 +315,7 @@ func SignUpPost(c *context.Context, cpt *captcha.Captcha, f form.Register) {
 	c.Data["EnableCaptcha"] = conf.Auth.EnableRegistrationCaptcha
 
 	if conf.Auth.DisableRegistration {
-		c.Status(403)
+		c.Status(http.StatusForbidden)
 		return
 	}
 
@@ -332,13 +336,16 @@ func SignUpPost(c *context.Context, cpt *captcha.Captcha, f form.Register) {
 		return
 	}
 
-	u := &db.User{
-		Name:     f.UserName,
-		Email:    f.Email,
-		Password: f.Password,
-		IsActive: !conf.Auth.RequireEmailConfirmation,
-	}
-	if err := db.CreateUser(u); err != nil {
+	user, err := db.Users.Create(
+		c.Req.Context(),
+		f.UserName,
+		f.Email,
+		db.CreateUserOptions{
+			Password:  f.Password,
+			Activated: !conf.Auth.RequireEmailConfirmation,
+		},
+	)
+	if err != nil {
 		switch {
 		case db.IsErrUserAlreadyExist(err):
 			c.FormErr("UserName")
@@ -354,33 +361,91 @@ func SignUpPost(c *context.Context, cpt *captcha.Captcha, f form.Register) {
 		}
 		return
 	}
-	log.Trace("Account created: %s", u.Name)
+	log.Trace("Account created: %s", user.Name)
 
+	// FIXME: Count has pretty bad performance implication in large instances, we
+	// should have a dedicate method to check whether the "user" table is empty.
+	//
 	// Auto-set admin for the only user.
-	if db.CountUsers() == 1 {
-		u.IsAdmin = true
-		u.IsActive = true
-		if err := db.UpdateUser(u); err != nil {
+	if db.Users.Count(c.Req.Context()) == 1 {
+		user.IsAdmin = true
+		user.IsActive = true
+		if err := db.UpdateUser(user); err != nil {
 			c.Error(err, "update user")
 			return
 		}
 	}
 
 	// Send confirmation email.
-	if conf.Auth.RequireEmailConfirmation && u.ID > 1 {
-		email.SendActivateAccountMail(c.Context, db.NewMailerUser(u))
+	if conf.Auth.RequireEmailConfirmation && user.ID > 1 {
+		email.SendActivateAccountMail(c.Context, db.NewMailerUser(user))
 		c.Data["IsSendRegisterMail"] = true
-		c.Data["Email"] = u.Email
+		c.Data["Email"] = user.Email
 		c.Data["Hours"] = conf.Auth.ActivateCodeLives / 60
 		c.Success(ACTIVATE)
 
-		if err := c.Cache.Put(userutil.MailResendCacheKey(u.ID), 1, 180); err != nil {
+		if err := c.Cache.Put(userutil.MailResendCacheKey(user.ID), 1, 180); err != nil {
 			log.Error("Failed to put cache key 'mail resend': %v", err)
 		}
 		return
 	}
 
 	c.RedirectSubpath("/user/login")
+}
+
+// parseUserFromCode returns user by username encoded in code.
+// It returns nil if code or username is invalid.
+func parseUserFromCode(code string) (user *db.User) {
+	if len(code) <= tool.TIME_LIMIT_CODE_LENGTH {
+		return nil
+	}
+
+	// Use tail hex username to query user
+	hexStr := code[tool.TIME_LIMIT_CODE_LENGTH:]
+	if b, err := hex.DecodeString(hexStr); err == nil {
+		if user, err = db.Users.GetByUsername(gocontext.TODO(), string(b)); user != nil {
+			return user
+		} else if !db.IsErrUserNotExist(err) {
+			log.Error("Failed to get user by name %q: %v", string(b), err)
+		}
+	}
+
+	return nil
+}
+
+// verify active code when active account
+func verifyUserActiveCode(code string) (user *db.User) {
+	minutes := conf.Auth.ActivateCodeLives
+
+	if user = parseUserFromCode(code); user != nil {
+		// time limit code
+		prefix := code[:tool.TIME_LIMIT_CODE_LENGTH]
+		data := com.ToStr(user.ID) + user.Email + user.LowerName + user.Password + user.Rands
+
+		if tool.VerifyTimeLimitCode(data, minutes, prefix) {
+			return user
+		}
+	}
+	return nil
+}
+
+// verify active code when active account
+func verifyActiveEmailCode(code, email string) *db.EmailAddress {
+	minutes := conf.Auth.ActivateCodeLives
+
+	if user := parseUserFromCode(code); user != nil {
+		// time limit code
+		prefix := code[:tool.TIME_LIMIT_CODE_LENGTH]
+		data := com.ToStr(user.ID) + email + user.LowerName + user.Password + user.Rands
+
+		if tool.VerifyTimeLimitCode(data, minutes, prefix) {
+			emailAddress, err := db.EmailAddresses.GetByEmail(gocontext.TODO(), email)
+			if err == nil {
+				return emailAddress
+			}
+		}
+	}
+	return nil
 }
 
 func Activate(c *context.Context) {
@@ -411,10 +476,10 @@ func Activate(c *context.Context) {
 	}
 
 	// Verify code.
-	if user := db.VerifyUserActiveCode(code); user != nil {
+	if user := verifyUserActiveCode(code); user != nil {
 		user.IsActive = true
 		var err error
-		if user.Rands, err = db.GetUserSalt(); err != nil {
+		if user.Rands, err = userutil.RandomSalt(); err != nil {
 			c.Error(err, "get user salt")
 			return
 		}
@@ -440,7 +505,7 @@ func ActivateEmail(c *context.Context) {
 	emailAddr := c.Query("email")
 
 	// Verify code.
-	if email := db.VerifyActiveEmailCode(code, emailAddr); email != nil {
+	if email := verifyActiveEmailCode(code, emailAddr); email != nil {
 		if err := email.Activate(); err != nil {
 			c.Error(err, "activate email")
 		}
@@ -477,7 +542,7 @@ func ForgotPasswdPost(c *context.Context) {
 	emailAddr := c.Query("email")
 	c.Data["Email"] = emailAddr
 
-	u, err := db.GetUserByEmail(emailAddr)
+	u, err := db.Users.GetByEmail(c.Req.Context(), emailAddr)
 	if err != nil {
 		if db.IsErrUserNotExist(err) {
 			c.Data["Hours"] = conf.Auth.ActivateCodeLives / 60
@@ -535,7 +600,7 @@ func ResetPasswdPost(c *context.Context) {
 	}
 	c.Data["Code"] = code
 
-	if u := db.VerifyUserActiveCode(code); u != nil {
+	if u := verifyUserActiveCode(code); u != nil {
 		// Validate password length.
 		passwd := c.Query("password")
 		if len(passwd) < 6 {
@@ -547,11 +612,11 @@ func ResetPasswdPost(c *context.Context) {
 
 		u.Password = passwd
 		var err error
-		if u.Rands, err = db.GetUserSalt(); err != nil {
+		if u.Rands, err = userutil.RandomSalt(); err != nil {
 			c.Error(err, "get user salt")
 			return
 		}
-		if u.Salt, err = db.GetUserSalt(); err != nil {
+		if u.Salt, err = userutil.RandomSalt(); err != nil {
 			c.Error(err, "get user salt")
 			return
 		}

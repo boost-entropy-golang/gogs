@@ -5,6 +5,7 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"xorm.io/xorm"
 
 	"gogs.io/gogs/internal/errutil"
+	"gogs.io/gogs/internal/repoutil"
 	"gogs.io/gogs/internal/userutil"
 )
 
@@ -71,7 +73,7 @@ func (org *User) GetMembers(limit int) error {
 
 	org.Members = make([]*User, len(ous))
 	for i, ou := range ous {
-		org.Members[i], err = GetUserByID(ou.Uid)
+		org.Members[i], err = Users.GetByID(context.TODO(), ou.Uid)
 		if err != nil {
 			return err
 		}
@@ -104,18 +106,19 @@ func CreateOrganization(org, owner *User) (err error) {
 		return err
 	}
 
-	isExist, err := IsUserExist(0, org.Name)
-	if err != nil {
-		return err
-	} else if isExist {
-		return ErrUserAlreadyExist{args: errutil.Args{"name": org.Name}}
+	if Users.IsUsernameUsed(context.TODO(), org.Name) {
+		return ErrUserAlreadyExist{
+			args: errutil.Args{
+				"name": org.Name,
+			},
+		}
 	}
 
 	org.LowerName = strings.ToLower(org.Name)
-	if org.Rands, err = GetUserSalt(); err != nil {
+	if org.Rands, err = userutil.RandomSalt(); err != nil {
 		return err
 	}
-	if org.Salt, err = GetUserSalt(); err != nil {
+	if org.Salt, err = userutil.RandomSalt(); err != nil {
 		return err
 	}
 	org.UseCustomAvatar = true
@@ -164,7 +167,7 @@ func CreateOrganization(org, owner *User) (err error) {
 		return fmt.Errorf("insert team-user relation: %v", err)
 	}
 
-	if err = os.MkdirAll(UserPath(org.Name), os.ModePerm); err != nil {
+	if err = os.MkdirAll(repoutil.UserPath(org.Name), os.ModePerm); err != nil {
 		return fmt.Errorf("create directory: %v", err)
 	}
 
@@ -364,11 +367,11 @@ func RemoveOrgUser(orgID, userID int64) error {
 		return nil
 	}
 
-	user, err := GetUserByID(userID)
+	user, err := Users.GetByID(context.TODO(), userID)
 	if err != nil {
 		return fmt.Errorf("GetUserByID [%d]: %v", userID, err)
 	}
-	org, err := GetUserByID(orgID)
+	org, err := Users.GetByID(context.TODO(), orgID)
 	if err != nil {
 		return fmt.Errorf("GetUserByID [%d]: %v", orgID, err)
 	}

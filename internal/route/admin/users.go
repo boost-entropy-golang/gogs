@@ -5,6 +5,7 @@
 package admin
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/unknwon/com"
@@ -32,8 +33,8 @@ func Users(c *context.Context) {
 
 	route.RenderUserSearch(c, &route.UserSearchOptions{
 		Type:     db.UserTypeIndividual,
-		Counter:  db.CountUsers,
-		Ranger:   db.ListUsers,
+		Counter:  db.Users.Count,
+		Ranger:   db.Users.List,
 		PageSize: conf.UI.Admin.UserPagingNum,
 		OrderBy:  "id ASC",
 		TplName:  USERS,
@@ -77,22 +78,20 @@ func NewUserPost(c *context.Context, f form.AdminCrateUser) {
 		return
 	}
 
-	u := &db.User{
-		Name:     f.UserName,
-		Email:    f.Email,
-		Password: f.Password,
-		IsActive: true,
+	createUserOpts := db.CreateUserOptions{
+		Password:  f.Password,
+		Activated: true,
 	}
-
 	if len(f.LoginType) > 0 {
 		fields := strings.Split(f.LoginType, "-")
 		if len(fields) == 2 {
-			u.LoginSource = com.StrTo(fields[1]).MustInt64()
-			u.LoginName = f.LoginName
+			createUserOpts.LoginSource, _ = strconv.ParseInt(fields[1], 10, 64)
+			createUserOpts.LoginName = f.LoginName
 		}
 	}
 
-	if err := db.CreateUser(u); err != nil {
+	user, err := db.Users.Create(c.Req.Context(), f.UserName, f.Email, createUserOpts)
+	if err != nil {
 		switch {
 		case db.IsErrUserAlreadyExist(err):
 			c.Data["Err_UserName"] = true
@@ -108,19 +107,19 @@ func NewUserPost(c *context.Context, f form.AdminCrateUser) {
 		}
 		return
 	}
-	log.Trace("Account created by admin (%s): %s", c.User.Name, u.Name)
+	log.Trace("Account %q created by admin %q", user.Name, c.User.Name)
 
 	// Send email notification.
 	if f.SendNotify && conf.Email.Enabled {
-		email.SendRegisterNotifyMail(c.Context, db.NewMailerUser(u))
+		email.SendRegisterNotifyMail(c.Context, db.NewMailerUser(user))
 	}
 
-	c.Flash.Success(c.Tr("admin.users.new_success", u.Name))
-	c.Redirect(conf.Server.Subpath + "/admin/users/" + com.ToStr(u.ID))
+	c.Flash.Success(c.Tr("admin.users.new_success", user.Name))
+	c.Redirect(conf.Server.Subpath + "/admin/users/" + strconv.FormatInt(user.ID, 10))
 }
 
 func prepareUserInfo(c *context.Context) *db.User {
-	u, err := db.GetUserByID(c.ParamsInt64(":userid"))
+	u, err := db.Users.GetByID(c.Req.Context(), c.ParamsInt64(":userid"))
 	if err != nil {
 		c.Error(err, "get user by ID")
 		return nil
@@ -189,7 +188,7 @@ func EditUserPost(c *context.Context, f form.AdminEditUser) {
 	if len(f.Password) > 0 {
 		u.Password = f.Password
 		var err error
-		if u.Salt, err = db.GetUserSalt(); err != nil {
+		if u.Salt, err = userutil.RandomSalt(); err != nil {
 			c.Error(err, "get user salt")
 			return
 		}
@@ -224,7 +223,7 @@ func EditUserPost(c *context.Context, f form.AdminEditUser) {
 }
 
 func DeleteUser(c *context.Context) {
-	u, err := db.GetUserByID(c.ParamsInt64(":userid"))
+	u, err := db.Users.GetByID(c.Req.Context(), c.ParamsInt64(":userid"))
 	if err != nil {
 		c.Error(err, "get user by ID")
 		return
