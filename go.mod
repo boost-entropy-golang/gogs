@@ -3,7 +3,7 @@ module gogs.io/gogs
 go 1.18
 
 require (
-	github.com/Masterminds/semver/v3 v3.1.1
+	github.com/Masterminds/semver/v3 v3.2.0
 	github.com/derision-test/go-mockgen v1.3.7
 	github.com/editorconfig/editorconfig-core-go/v2 v2.5.1
 	github.com/go-ldap/ldap/v3 v3.4.4
@@ -44,7 +44,7 @@ require (
 	github.com/urfave/cli v1.22.10
 	golang.org/x/crypto v0.0.0-20221005025214-4161e89ecf1b
 	golang.org/x/net v0.0.0-20221002022538-bcab6841153b
-	golang.org/x/text v0.4.0
+	golang.org/x/text v0.5.0
 	gopkg.in/DATA-DOG/go-sqlmock.v2 v2.0.0-20180914054222-c19298f520d0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gopkg.in/ini.v1 v1.67.0
@@ -54,7 +54,7 @@ require (
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/driver/sqlserver v1.4.1
 	gorm.io/gorm v1.24.1-0.20221019064659-5dd2bb482755
-	modernc.org/sqlite v1.19.5
+	modernc.org/sqlite v1.20.0
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
 	xorm.io/core v0.7.2
