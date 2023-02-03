@@ -44,20 +44,20 @@ const (
 
 // PublicKey represents a user or deploy SSH public key.
 type PublicKey struct {
-	ID          int64
-	OwnerID     int64      `xorm:"INDEX NOT NULL"`
-	Name        string     `xorm:"NOT NULL"`
-	Fingerprint string     `xorm:"NOT NULL"`
-	Content     string     `xorm:"TEXT NOT NULL"`
-	Mode        AccessMode `xorm:"NOT NULL DEFAULT 2"`
-	Type        KeyType    `xorm:"NOT NULL DEFAULT 1"`
+	ID          int64      `gorm:"primaryKey"`
+	OwnerID     int64      `xorm:"INDEX NOT NULL" gorm:"index;not null"`
+	Name        string     `xorm:"NOT NULL" gorm:"not null"`
+	Fingerprint string     `xorm:"NOT NULL" gorm:"not null"`
+	Content     string     `xorm:"TEXT NOT NULL" gorm:"type:TEXT;not null"`
+	Mode        AccessMode `xorm:"NOT NULL DEFAULT 2" gorm:"not null;default:2"`
+	Type        KeyType    `xorm:"NOT NULL DEFAULT 1" gorm:"not null;default:1"`
 
-	Created           time.Time `xorm:"-" json:"-"`
+	Created           time.Time `xorm:"-" json:"-" gorm:"-"`
 	CreatedUnix       int64
-	Updated           time.Time `xorm:"-" json:"-"` // Note: Updated must below Created for AfterSet.
+	Updated           time.Time `xorm:"-" json:"-" gorm:"-"` // Note: Updated must below Created for AfterSet.
 	UpdatedUnix       int64
-	HasRecentActivity bool `xorm:"-" json:"-"`
-	HasUsed           bool `xorm:"-" json:"-"`
+	HasRecentActivity bool `xorm:"-" json:"-" gorm:"-"`
+	HasUsed           bool `xorm:"-" json:"-" gorm:"-"`
 }
 
 func (k *PublicKey) BeforeInsert() {
@@ -533,7 +533,7 @@ func RewriteAuthorizedKeys() error {
 	}
 	defer os.Remove(tmpPath)
 
-	err = x.Iterate(new(PublicKey), func(idx int, bean interface{}) (err error) {
+	err = x.Iterate(new(PublicKey), func(idx int, bean any) (err error) {
 		_, err = f.WriteString((bean.(*PublicKey)).AuthorizedString())
 		return err
 	})
@@ -688,7 +688,7 @@ func AddDeployKey(repoID int64, name, content string) (*DeployKey, error) {
 var _ errutil.NotFound = (*ErrDeployKeyNotExist)(nil)
 
 type ErrDeployKeyNotExist struct {
-	args map[string]interface{}
+	args map[string]any
 }
 
 func IsErrDeployKeyNotExist(err error) bool {
@@ -711,7 +711,7 @@ func GetDeployKeyByID(id int64) (*DeployKey, error) {
 	if err != nil {
 		return nil, err
 	} else if !has {
-		return nil, ErrDeployKeyNotExist{args: map[string]interface{}{"deployKeyID": id}}
+		return nil, ErrDeployKeyNotExist{args: map[string]any{"deployKeyID": id}}
 	}
 	return key, nil
 }
@@ -726,7 +726,7 @@ func GetDeployKeyByRepo(keyID, repoID int64) (*DeployKey, error) {
 	if err != nil {
 		return nil, err
 	} else if !has {
-		return nil, ErrDeployKeyNotExist{args: map[string]interface{}{"keyID": keyID, "repoID": repoID}}
+		return nil, ErrDeployKeyNotExist{args: map[string]any{"keyID": keyID, "repoID": repoID}}
 	}
 	return key, nil
 }

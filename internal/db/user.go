@@ -18,7 +18,6 @@ import (
 	"github.com/gogs/git-module"
 
 	"gogs.io/gogs/internal/conf"
-	"gogs.io/gogs/internal/db/errors"
 	"gogs.io/gogs/internal/repoutil"
 	"gogs.io/gogs/internal/userutil"
 )
@@ -40,7 +39,7 @@ func (u *User) AfterSet(colName string, _ xorm.Cell) {
 }
 
 // deleteBeans deletes all given beans, beans should contain delete conditions.
-func deleteBeans(e Engine, beans ...interface{}) (err error) {
+func deleteBeans(e Engine, beans ...any) (err error) {
 	for i := range beans {
 		if _, err = e.Delete(beans[i]); err != nil {
 			return err
@@ -203,40 +202,15 @@ func DeleteInactivateUsers() (err error) {
 	return err
 }
 
-func GetUserByKeyID(keyID int64) (*User, error) {
-	user := new(User)
-	has, err := x.SQL("SELECT a.* FROM `user` AS a, public_key AS b WHERE a.id = b.owner_id AND b.id=?", keyID).Get(user)
-	if err != nil {
-		return nil, err
-	} else if !has {
-		return nil, errors.UserNotKeyOwner{KeyID: keyID}
-	}
-	return user, nil
-}
-
 func getUserByID(e Engine, id int64) (*User, error) {
 	u := new(User)
 	has, err := e.ID(id).Get(u)
 	if err != nil {
 		return nil, err
 	} else if !has {
-		return nil, ErrUserNotExist{args: map[string]interface{}{"userID": id}}
+		return nil, ErrUserNotExist{args: map[string]any{"userID": id}}
 	}
 	return u, nil
-}
-
-// GetAssigneeByID returns the user with read access of repository by given ID.
-func GetAssigneeByID(repo *Repository, userID int64) (*User, error) {
-	ctx := context.TODO()
-	if !Perms.Authorize(ctx, userID, repo.ID, AccessModeRead,
-		AccessModeOptions{
-			OwnerID: repo.OwnerID,
-			Private: repo.IsPrivate,
-		},
-	) {
-		return nil, ErrUserNotExist{args: map[string]interface{}{"userID": userID}}
-	}
-	return Users.GetByID(ctx, userID)
 }
 
 // GetUserEmailsByNames returns a list of e-mails corresponds to names.

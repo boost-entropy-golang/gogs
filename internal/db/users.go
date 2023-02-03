@@ -70,6 +70,9 @@ type UsersStore interface {
 	// GetByUsername returns the user with given username. It returns
 	// ErrUserNotExist when not found.
 	GetByUsername(ctx context.Context, username string) (*User, error)
+	// GetByKeyID returns the owner of given public key ID. It returns
+	// ErrUserNotExist when not found.
+	GetByKeyID(ctx context.Context, keyID int64) (*User, error)
 	// HasForkedRepository returns true if the user has forked given repository.
 	HasForkedRepository(ctx context.Context, userID, repoID int64) bool
 	// IsUsernameUsed returns true if the given username has been used other than
@@ -155,7 +158,7 @@ func (db *users) Authenticate(ctx context.Context, login, password string, login
 				return user, nil
 			}
 
-			return nil, auth.ErrBadCredentials{Args: map[string]interface{}{"login": login, "userID": user.ID}}
+			return nil, auth.ErrBadCredentials{Args: map[string]any{"login": login, "userID": user.ID}}
 		}
 
 		authSourceID = user.LoginSource
@@ -163,7 +166,7 @@ func (db *users) Authenticate(ctx context.Context, login, password string, login
 	} else {
 		// Non-local login source is always greater than 0.
 		if loginSourceID <= 0 {
-			return nil, auth.ErrBadCredentials{Args: map[string]interface{}{"login": login}}
+			return nil, auth.ErrBadCredentials{Args: map[string]any{"login": login}}
 		}
 
 		authSourceID = loginSourceID
@@ -403,7 +406,7 @@ func (db *users) DeleteCustomAvatar(ctx context.Context, userID int64) error {
 	return db.WithContext(ctx).
 		Model(&User{}).
 		Where("id = ?", userID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"use_custom_avatar": false,
 			"updated_unix":      db.NowFunc().Unix(),
 		}).
@@ -478,6 +481,22 @@ func (db *users) GetByUsername(ctx context.Context, username string) (*User, err
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, ErrUserNotExist{args: errutil.Args{"name": username}}
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+func (db *users) GetByKeyID(ctx context.Context, keyID int64) (*User, error) {
+	user := new(User)
+	err := db.WithContext(ctx).
+		Joins(dbutil.Quote("JOIN public_key ON public_key.owner_id = %s.id", "user")).
+		Where("public_key.id = ?", keyID).
+		First(user).
+		Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrUserNotExist{args: errutil.Args{"keyID": keyID}}
 		}
 		return nil, err
 	}
@@ -674,7 +693,7 @@ func (db *users) UseCustomAvatar(ctx context.Context, userID int64, avatar []byt
 	return db.WithContext(ctx).
 		Model(&User{}).
 		Where("id = ?", userID).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"use_custom_avatar": true,
 			"updated_unix":      db.NowFunc().Unix(),
 		}).

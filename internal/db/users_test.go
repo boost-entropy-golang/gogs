@@ -82,7 +82,7 @@ func TestUsers(t *testing.T) {
 	}
 	t.Parallel()
 
-	tables := []interface{}{new(User), new(EmailAddress), new(Repository), new(Follow), new(PullRequest)}
+	tables := []any{new(User), new(EmailAddress), new(Repository), new(Follow), new(PullRequest), new(PublicKey)}
 	db := &users{
 		DB: dbtest.NewDB(t, "users", tables...),
 	}
@@ -99,6 +99,7 @@ func TestUsers(t *testing.T) {
 		{"GetByEmail", usersGetByEmail},
 		{"GetByID", usersGetByID},
 		{"GetByUsername", usersGetByUsername},
+		{"GetByKeyID", usersGetByKeyID},
 		{"HasForkedRepository", usersHasForkedRepository},
 		{"IsUsernameUsed", usersIsUsernameUsed},
 		{"List", usersList},
@@ -133,13 +134,13 @@ func usersAuthenticate(t *testing.T, db *users) {
 
 	t.Run("user not found", func(t *testing.T) {
 		_, err := db.Authenticate(ctx, "bob", password, -1)
-		wantErr := auth.ErrBadCredentials{Args: map[string]interface{}{"login": "bob"}}
+		wantErr := auth.ErrBadCredentials{Args: map[string]any{"login": "bob"}}
 		assert.Equal(t, wantErr, err)
 	})
 
 	t.Run("invalid password", func(t *testing.T) {
 		_, err := db.Authenticate(ctx, alice.Name, "bad_password", -1)
-		wantErr := auth.ErrBadCredentials{Args: map[string]interface{}{"login": alice.Name, "userID": alice.ID}}
+		wantErr := auth.ErrBadCredentials{Args: map[string]any{"login": alice.Name, "userID": alice.ID}}
 		assert.Equal(t, wantErr, err)
 	})
 
@@ -158,7 +159,7 @@ func usersAuthenticate(t *testing.T, db *users) {
 	t.Run("login source mismatch", func(t *testing.T) {
 		_, err := db.Authenticate(ctx, alice.Email, password, 1)
 		gotErr := fmt.Sprintf("%v", err)
-		wantErr := ErrLoginSourceMismatch{args: map[string]interface{}{"actual": 0, "expect": 1}}.Error()
+		wantErr := ErrLoginSourceMismatch{args: map[string]any{"actual": 0, "expect": 1}}.Error()
 		assert.Equal(t, wantErr, gotErr)
 	})
 
@@ -550,6 +551,33 @@ func usersGetByUsername(t *testing.T, db *users) {
 
 	_, err = db.GetByUsername(ctx, "bad_username")
 	wantErr := ErrUserNotExist{args: errutil.Args{"name": "bad_username"}}
+	assert.Equal(t, wantErr, err)
+}
+
+func usersGetByKeyID(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@exmaple.com", CreateUserOptions{})
+	require.NoError(t, err)
+
+	// TODO: Use PublicKeys.Create to replace SQL hack when the method is available.
+	publicKey := &PublicKey{
+		OwnerID:     alice.ID,
+		Name:        "test-key",
+		Fingerprint: "12:f8:7e:78:61:b4:bf:e2:de:24:15:96:4e:d4:72:53",
+		Content:     "test-key-content",
+		CreatedUnix: db.NowFunc().Unix(),
+		UpdatedUnix: db.NowFunc().Unix(),
+	}
+	err = db.WithContext(ctx).Create(publicKey).Error
+	require.NoError(t, err)
+
+	user, err := db.GetByKeyID(ctx, publicKey.ID)
+	require.NoError(t, err)
+	assert.Equal(t, alice.Name, user.Name)
+
+	_, err = db.GetByKeyID(ctx, publicKey.ID+1)
+	wantErr := ErrUserNotExist{args: errutil.Args{"keyID": publicKey.ID + 1}}
 	assert.Equal(t, wantErr, err)
 }
 
