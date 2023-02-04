@@ -73,6 +73,10 @@ type UsersStore interface {
 	// GetByKeyID returns the owner of given public key ID. It returns
 	// ErrUserNotExist when not found.
 	GetByKeyID(ctx context.Context, keyID int64) (*User, error)
+	// GetMailableEmailsByUsernames returns a list of verified primary email
+	// addresses (where email notifications are sent to) of users with given list of
+	// usernames. Non-existing usernames are ignored.
+	GetMailableEmailsByUsernames(ctx context.Context, usernames []string) ([]string, error)
 	// HasForkedRepository returns true if the user has forked given repository.
 	HasForkedRepository(ctx context.Context, userID, repoID int64) bool
 	// IsUsernameUsed returns true if the given username has been used other than
@@ -90,6 +94,12 @@ type UsersStore interface {
 	// Results are paginated by given page and page size, and sorted by the time of
 	// follow in descending order.
 	ListFollowings(ctx context.Context, userID int64, page, pageSize int) ([]*User, error)
+	// SearchByName returns a list of users whose username or full name matches the
+	// given keyword case-insensitively. Results are paginated by given page and
+	// page size, and sorted by the given order (e.g. "id DESC"). A total count of
+	// all results is also returned. If the order is not given, it's up to the
+	// database to decide.
+	SearchByName(ctx context.Context, keyword string, page, pageSize int, orderBy string) ([]*User, int64, error)
 	// Update updates fields for the given user.
 	Update(ctx context.Context, userID int64, opts UpdateUserOptions) error
 	// UseCustomAvatar uses the given avatar as the user custom avatar.
@@ -503,6 +513,15 @@ func (db *users) GetByKeyID(ctx context.Context, keyID int64) (*User, error) {
 	return user, nil
 }
 
+func (db *users) GetMailableEmailsByUsernames(ctx context.Context, usernames []string) ([]string, error) {
+	emails := make([]string, 0, len(usernames))
+	return emails, db.WithContext(ctx).
+		Model(&User{}).
+		Select("email").
+		Where("lower_name IN (?) AND is_active = ?", usernames, true).
+		Find(&emails).Error
+}
+
 func (db *users) HasForkedRepository(ctx context.Context, userID, repoID int64) bool {
 	var count int64
 	db.WithContext(ctx).Model(new(Repository)).Where("owner_id = ? AND fork_id = ?", userID, repoID).Count(&count)
@@ -568,6 +587,29 @@ func (db *users) ListFollowings(ctx context.Context, userID int64, page, pageSiz
 		Order("follow.id DESC").
 		Find(&users).
 		Error
+}
+
+func searchUserByName(ctx context.Context, db *gorm.DB, userType UserType, keyword string, page, pageSize int, orderBy string) ([]*User, int64, error) {
+	if keyword == "" {
+		return []*User{}, 0, nil
+	}
+	keyword = "%" + strings.ToLower(keyword) + "%"
+
+	tx := db.WithContext(ctx).
+		Where("type = ? AND (lower_name LIKE ? OR LOWER(full_name) LIKE ?)", userType, keyword, keyword)
+
+	var count int64
+	err := tx.Model(&User{}).Count(&count).Error
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "count")
+	}
+
+	users := make([]*User, 0, pageSize)
+	return users, count, tx.Order(orderBy).Limit(pageSize).Offset((page - 1) * pageSize).Find(&users).Error
+}
+
+func (db *users) SearchByName(ctx context.Context, keyword string, page, pageSize int, orderBy string) ([]*User, int64, error) {
+	return searchUserByName(ctx, db.DB, UserTypeIndividual, keyword, page, pageSize, orderBy)
 }
 
 type UpdateUserOptions struct {
@@ -785,11 +827,6 @@ func (u *User) IsLocal() bool {
 // IsOrganization returns true if the user is an organization.
 func (u *User) IsOrganization() bool {
 	return u.Type == UserTypeOrganization
-}
-
-// IsMailable returns true if the user is eligible to receive emails.
-func (u *User) IsMailable() bool {
-	return u.IsActive
 }
 
 // APIFormat returns the API format of a user.

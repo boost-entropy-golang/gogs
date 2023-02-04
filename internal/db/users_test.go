@@ -100,11 +100,13 @@ func TestUsers(t *testing.T) {
 		{"GetByID", usersGetByID},
 		{"GetByUsername", usersGetByUsername},
 		{"GetByKeyID", usersGetByKeyID},
+		{"GetMailableEmailsByUsernames", usersGetMailableEmailsByUsernames},
 		{"HasForkedRepository", usersHasForkedRepository},
 		{"IsUsernameUsed", usersIsUsernameUsed},
 		{"List", usersList},
 		{"ListFollowers", usersListFollowers},
 		{"ListFollowings", usersListFollowings},
+		{"SearchByName", usersSearchByName},
 		{"Update", usersUpdate},
 		{"UseCustomAvatar", usersUseCustomAvatar},
 	} {
@@ -581,6 +583,22 @@ func usersGetByKeyID(t *testing.T, db *users) {
 	assert.Equal(t, wantErr, err)
 }
 
+func usersGetMailableEmailsByUsernames(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@exmaple.com", CreateUserOptions{})
+	require.NoError(t, err)
+	bob, err := db.Create(ctx, "bob", "bob@exmaple.com", CreateUserOptions{Activated: true})
+	require.NoError(t, err)
+	_, err = db.Create(ctx, "cindy", "cindy@exmaple.com", CreateUserOptions{Activated: true})
+	require.NoError(t, err)
+
+	got, err := db.GetMailableEmailsByUsernames(ctx, []string{alice.Name, bob.Name, "404"})
+	require.NoError(t, err)
+	want := []string{bob.Email}
+	assert.Equal(t, want, got)
+}
+
 func usersHasForkedRepository(t *testing.T, db *users) {
 	ctx := context.Background()
 
@@ -754,6 +772,46 @@ func usersListFollowings(t *testing.T, db *users) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, alice.ID, got[0].ID)
+}
+
+func usersSearchByName(t *testing.T, db *users) {
+	ctx := context.Background()
+
+	alice, err := db.Create(ctx, "alice", "alice@example.com", CreateUserOptions{FullName: "Alice Jordan"})
+	require.NoError(t, err)
+	bob, err := db.Create(ctx, "bob", "bob@example.com", CreateUserOptions{FullName: "Bob Jordan"})
+	require.NoError(t, err)
+
+	t.Run("search for username alice", func(t *testing.T) {
+		users, count, err := db.SearchByName(ctx, "Li", 1, 1, "")
+		require.NoError(t, err)
+		require.Len(t, users, int(count))
+		assert.Equal(t, int64(1), count)
+		assert.Equal(t, alice.ID, users[0].ID)
+	})
+
+	t.Run("search for username bob", func(t *testing.T) {
+		users, count, err := db.SearchByName(ctx, "oB", 1, 1, "")
+		require.NoError(t, err)
+		require.Len(t, users, int(count))
+		assert.Equal(t, int64(1), count)
+		assert.Equal(t, bob.ID, users[0].ID)
+	})
+
+	t.Run("search for full name jordan", func(t *testing.T) {
+		users, count, err := db.SearchByName(ctx, "Jo", 1, 10, "")
+		require.NoError(t, err)
+		require.Len(t, users, int(count))
+		assert.Equal(t, int64(2), count)
+	})
+
+	t.Run("search for full name jordan ORDER BY id DESC LIMIT 1", func(t *testing.T) {
+		users, count, err := db.SearchByName(ctx, "Jo", 1, 1, "id DESC")
+		require.NoError(t, err)
+		require.Len(t, users, 1)
+		assert.Equal(t, int64(2), count)
+		assert.Equal(t, bob.ID, users[0].ID)
+	})
 }
 
 func usersUpdate(t *testing.T, db *users) {
