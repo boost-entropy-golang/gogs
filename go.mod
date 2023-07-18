@@ -28,7 +28,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.24
 	github.com/msteinert/pam v0.0.0-20190215180659-f29b9f28d6f9
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
-	github.com/niklasfasching/go-org v1.6.6
+	github.com/niklasfasching/go-org v1.7.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/pquerna/otp v1.3.0
@@ -55,7 +55,7 @@ require (
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/driver/sqlserver v1.4.1
 	gorm.io/gorm v1.25.2
-	modernc.org/sqlite v1.23.1
+	modernc.org/sqlite v1.24.0
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
 	xorm.io/core v0.7.2
