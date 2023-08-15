@@ -17,7 +17,7 @@ require (
 	github.com/go-macaron/toolbox v0.0.0-20190813233741-94defb8383c6
 	github.com/gogs/chardet v0.0.0-20150115103509-2404f7772561
 	github.com/gogs/cron v0.0.0-20171120032916-9f6c956d3e14
-	github.com/gogs/git-module v1.8.2
+	github.com/gogs/git-module v1.8.3
 	github.com/gogs/go-gogs-client v0.0.0-20200128182646-c69cb7680fd4
 	github.com/gogs/go-libravatar v0.0.0-20191106065024-33a75213d0a0
 	github.com/gogs/minwinsvc v0.0.0-20170301035411-95be6356811a
@@ -54,7 +54,7 @@ require (
 	gorm.io/driver/postgres v1.5.2
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/driver/sqlserver v1.4.1
-	gorm.io/gorm v1.25.2
+	gorm.io/gorm v1.25.3
 	modernc.org/sqlite v1.25.0
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
