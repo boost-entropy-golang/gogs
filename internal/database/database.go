@@ -117,14 +117,12 @@ func NewConnection(w logger.Writer) (*gorm.DB, error) {
 		log.Trace("Auto migrated %q", name)
 	}
 
-	sourceFiles, err := loadLoginSourceFiles(filepath.Join(conf.CustomDir(), "conf", "auth.d"), db.NowFunc)
+	loadedLoginSourceFilesStore, err = loadLoginSourceFiles(filepath.Join(conf.CustomDir(), "conf", "auth.d"), db.NowFunc)
 	if err != nil {
 		return nil, errors.Wrap(err, "load login source files")
 	}
 
 	// Initialize stores, sorted in alphabetical order.
-	LoginSources = &loginSourcesStore{DB: db, files: sourceFiles}
-	Notices = NewNoticesStore(db)
 	Orgs = NewOrgsStore(db)
 	Perms = NewPermsStore(db)
 	Repos = NewReposStore(db)
@@ -165,4 +163,16 @@ func (db *DB) Actions() *ActionsStore {
 
 func (db *DB) LFS() *LFSStore {
 	return newLFSStore(db.db)
+}
+
+// NOTE: It is not guarded by a mutex because it only gets written during the
+// service start.
+var loadedLoginSourceFilesStore loginSourceFilesStore
+
+func (db *DB) LoginSources() *LoginSourcesStore {
+	return newLoginSourcesStore(db.db, loadedLoginSourceFilesStore)
+}
+
+func (db *DB) Notices() *NoticesStore {
+	return newNoticesStore(db.db)
 }
