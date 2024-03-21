@@ -123,15 +123,16 @@ func NewConnection(w logger.Writer) (*gorm.DB, error) {
 	}
 
 	// Initialize stores, sorted in alphabetical order.
-	Orgs = NewOrgsStore(db)
 	Perms = NewPermsStore(db)
 	Repos = NewReposStore(db)
 	TwoFactors = &twoFactorsStore{DB: db}
 	Users = NewUsersStore(db)
 
+	Handle = &DB{db: db}
 	return db, nil
 }
 
+// DB is the database handler for the storage layer.
 type DB struct {
 	db *gorm.DB
 }
@@ -147,11 +148,6 @@ type DB struct {
 // during the service start or during the installation process (which is a
 // single-thread process).
 var Handle *DB
-
-// SetHandle updates the global database handle with the given connection.
-func SetHandle(db *gorm.DB) {
-	Handle = &DB{db: db}
-}
 
 func (db *DB) AccessTokens() *AccessTokensStore {
 	return newAccessTokensStore(db.db)
@@ -175,4 +171,8 @@ func (db *DB) LoginSources() *LoginSourcesStore {
 
 func (db *DB) Notices() *NoticesStore {
 	return newNoticesStore(db.db)
+}
+
+func (db *DB) Organizations() *OrganizationsStore {
+	return newOrganizationsStoreStore(db.db)
 }
