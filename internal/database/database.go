@@ -122,10 +122,7 @@ func NewConnection(w logger.Writer) (*gorm.DB, error) {
 		return nil, errors.Wrap(err, "load login source files")
 	}
 
-	// Initialize stores, sorted in alphabetical order.
-	TwoFactors = &twoFactorsStore{DB: db}
-	Users = NewUsersStore(db)
-
+	// Initialize the database handle.
 	Handle = &DB{db: db}
 	return db, nil
 }
@@ -185,4 +182,12 @@ func (db *DB) PublicKey() *PublicKeysStore {
 
 func (db *DB) Repositories() *RepositoriesStore {
 	return newReposStore(db.db)
+}
+
+func (db *DB) TwoFactors() *TwoFactorsStore {
+	return newTwoFactorsStore(db.db)
+}
+
+func (db *DB) Users() *UsersStore {
+	return newUsersStore(db.db)
 }

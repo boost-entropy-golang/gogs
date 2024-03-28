@@ -66,7 +66,7 @@ func HTTPContexter(store Store) macaron.Handler {
 			strings.HasSuffix(c.Req.URL.Path, "git-upload-pack") ||
 			c.Req.Method == "GET"
 
-		owner, err := database.Users.GetByUsername(c.Req.Context(), ownerName)
+		owner, err := store.GetUserByUsername(c.Req.Context(), ownerName)
 		if err != nil {
 			if database.IsErrUserNotExist(err) {
 				c.Status(http.StatusNotFound)
@@ -124,7 +124,7 @@ func HTTPContexter(store Store) macaron.Handler {
 			return
 		}
 
-		authUser, err := database.Users.Authenticate(c.Req.Context(), authUsername, authPassword, -1)
+		authUser, err := store.AuthenticateUser(c.Req.Context(), authUsername, authPassword, -1)
 		if err != nil && !auth.IsErrBadCredentials(err) {
 			c.Status(http.StatusInternalServerError)
 			log.Error("Failed to authenticate user [name: %s]: %v", authUsername, err)
@@ -152,7 +152,7 @@ func HTTPContexter(store Store) macaron.Handler {
 					return
 				}
 			}
-		} else if database.TwoFactors.IsEnabled(c.Req.Context(), authUser.ID) {
+		} else if store.IsTwoFactorEnabled(c.Req.Context(), authUser.ID) {
 			askCredentials(c, http.StatusUnauthorized, `User with two-factor authentication enabled cannot perform HTTP/HTTPS operations via plain username and password
 Please create and use personal access token on user settings page`)
 			return
