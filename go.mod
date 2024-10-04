@@ -32,7 +32,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/pquerna/otp v1.3.0
-	github.com/prometheus/client_golang v1.20.2
+	github.com/prometheus/client_golang v1.20.4
 	github.com/russross/blackfriday v1.6.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/sergi/go-diff v1.3.1
@@ -43,9 +43,9 @@ require (
 	github.com/unknwon/i18n v0.0.0-20190805065654-5c6446a380b6
 	github.com/unknwon/paginater v0.0.0-20170405233947-45e5d631308e
 	github.com/urfave/cli v1.22.15
-	golang.org/x/crypto v0.26.0
-	golang.org/x/net v0.28.0
-	golang.org/x/text v0.17.0
+	golang.org/x/crypto v0.27.0
+	golang.org/x/net v0.29.0
+	golang.org/x/text v0.18.0
 	gopkg.in/DATA-DOG/go-sqlmock.v2 v2.0.0-20180914054222-c19298f520d0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gopkg.in/ini.v1 v1.67.0
@@ -55,7 +55,7 @@ require (
 	gorm.io/driver/sqlite v1.4.2
 	gorm.io/driver/sqlserver v1.4.1
 	gorm.io/gorm v1.25.7-0.20240204074919-46816ad31dde
-	modernc.org/sqlite v1.32.0
+	modernc.org/sqlite v1.33.1
 	unknwon.dev/clog/v2 v2.2.0
 	xorm.io/builder v0.3.6
 	xorm.io/core v0.7.2
@@ -122,7 +122,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.11.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.23.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/bufio.v1 v1.0.0-20140618132640-567b2bfa514e // indirect
