@@ -32,7 +32,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/errors v0.9.1
 	github.com/pquerna/otp v1.3.0
-	github.com/prometheus/client_golang v1.20.4
+	github.com/prometheus/client_golang v1.20.5
 	github.com/russross/blackfriday v1.6.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/sergi/go-diff v1.3.1
@@ -42,10 +42,10 @@ require (
 	github.com/unknwon/com v1.0.1
 	github.com/unknwon/i18n v0.0.0-20190805065654-5c6446a380b6
 	github.com/unknwon/paginater v0.0.0-20170405233947-45e5d631308e
-	github.com/urfave/cli v1.22.15
-	golang.org/x/crypto v0.27.0
-	golang.org/x/net v0.29.0
-	golang.org/x/text v0.18.0
+	github.com/urfave/cli v1.22.16
+	golang.org/x/crypto v0.28.0
+	golang.org/x/net v0.30.0
+	golang.org/x/text v0.19.0
 	gopkg.in/DATA-DOG/go-sqlmock.v2 v2.0.0-20180914054222-c19298f520d0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gopkg.in/ini.v1 v1.67.0
@@ -70,7 +70,7 @@ require (
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/bradfitz/gomemcache v0.0.0-20190329173943-551aad21a668 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/denisenkom/go-mssqldb v0.12.0 // indirect
 	github.com/djherbis/buffer v1.2.0 // indirect
@@ -122,7 +122,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.11.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/sys v0.26.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/bufio.v1 v1.0.0-20140618132640-567b2bfa514e // indirect
