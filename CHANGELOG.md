@@ -11,13 +11,14 @@ All notable changes to Gogs are documented in this file.
 ### Changed
 
 - The required Go version to compile source code changed to 1.23.4.
+- The build tag `cert` has been removed, and the `gogs cert` subcommand is now always available. [#7883](https://github.com/gogs/gogs/pull/7883)
 
 ### Fixed
 
 - Submodules using `ssh://` protocol and a port number are not rendered correctly. [#4941](https://github.com/gogs/gogs/issues/4941)
 - Missing link to user profile on the first commit in commits history page. [#7404](https://github.com/gogs/gogs/issues/7404)
 
-## 0.13.1
+## 0.13.2
 
 ### Fixed
 
